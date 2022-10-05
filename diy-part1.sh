@@ -10,4 +10,5 @@
 # Description: OpenWrt DIY script part 1 (Before Update feeds)
 # Add a feed source
 # echo 'src-git helloworld https://github.com/fw876/helloworld' >>feeds.conf.default
-echo "https://github.com/kenzok8/openwrt-packages.git" >> "feeds.conf.default"
+# echo "https://github.com/kenzok8/openwrt-packages.git" >> "feeds.conf.default"
+git clone https://github.com/kenzok8/openwrt-packages package/openwrt-packages
