@@ -10,4 +10,4 @@
 # Description: OpenWrt DIY script part 1 (Before Update feeds)
 # Add a feed source
 # echo 'src-git helloworld https://github.com/fw876/helloworld' >>feeds.conf.default
-git clone https://github.com/TorBoxCode/luci-app-eqos.git package/lean/luci-app-eqos
+
