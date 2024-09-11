@@ -13,3 +13,6 @@
 # Modify default IP
 sed -i 's/192.168.1.1/192.168.2.1/g' package/base-files/files/bin/config_generate
 
+# 修改默认wifi名称ssid为tymishop
+sed -i 's/ssid=OpenWrt/ssid=OpenWRT/g' package/kernel/mac80211/files/lib/wifi/mac80211.sh
+
