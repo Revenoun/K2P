@@ -17,3 +17,7 @@ sed -i 's/192.168.1.1/192.168.2.1/g' package/base-files/files/bin/config_generat
 # sed -i 's/luci-theme-bootstrap/luci-theme-bootstrap/g' feeds/luci/collections/luci-nginx/Makefile
 # sed -i 's/luci-theme-bootstrap/luci-theme-bootstrap/g' feeds/luci/collections/luci-ssl-nginx/Makefile
 
+# # Install theme
+rm -rf package/lean/luci-theme-argon 
+git clone -b 18.06 https://github.com/jerrykuku/luci-theme-argon.git  package/lean/luci-theme-argon
+git clone https://github.com/jerrykuku/luci-app-argon-config.git  package/lean/luci-theme-argon-config
