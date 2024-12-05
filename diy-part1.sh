@@ -10,3 +10,5 @@
 # Description: OpenWrt DIY script part 1 (Before Update feeds)
 # Add a feed source
 echo 'src-git helloworld https://github.com/fw876/helloworld;main' >>feeds.conf.default
+echo 'src-git luci https://github.com/coolsnowwolf/luci' >>feeds.conf.default
+echo '#src-git luci https://github.com/coolsnowwolf/luci.git;openwrt-23.05' >>feeds.conf.default
