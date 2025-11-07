@@ -11,7 +11,6 @@
 # Add a feed source
 # sed -i '2 c\src-git luci https://github.com/coolsnowwolf/luci' feeds.conf.default
 # sed -i '3 c\#src-git luci https://github.com/coolsnowwolf/luci.git;openwrt-23.05' feeds.conf.default
-# echo 'src-git helloworld https://github.com/fw876/helloworld;main' >>feeds.conf.default
-sed -i '1i src-git kenzo https://github.com/kenzok8/openwrt-packages' feeds.conf.default
-sed -i '2i src-git small https://github.com/kenzok8/small' feeds.conf.default
+echo 'src-git helloworld https://github.com/fw876/helloworld;main' >>feeds.conf.default
+
 
