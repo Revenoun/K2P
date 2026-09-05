@@ -22,7 +22,7 @@
 
 
 echo "==================== DIY-PART2 START ===================="
-cd openwrt
+cd lede
 # 修改主机名 K2P
 sed -i 's/OpenWrt/K2P/g' package/base-files/files/bin/config_generate
 # 默认LAN IP：192.168.2.1
