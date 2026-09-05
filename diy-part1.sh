@@ -1,7 +1,7 @@
 #!/bin/bash
 #=====================diy1.sh 开始=====================
 # 克隆 aurora 主题到package
-git clone https://github.com/aurora/luci-theme-aurora.git package/luci-theme-aurora
+git clone https://github.com/eamonxg/luci-theme-aurora.git package/luci-theme-aurora
 
 # 创建uci-defaults首次开机自动设置aurora为默认主题
 mkdir -p package/luci-theme-aurora/files
