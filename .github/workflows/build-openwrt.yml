@@ -94,6 +94,12 @@ jobs:
 
     - name: Update feeds
       run: cd openwrt && ./scripts/feeds update -a
+      
+    #新增步骤：删除helloworld里导致失败的luci补丁
+    - name: Remove helloworld broken patch
+      run: |
+        cd openwrt
+        rm -rf feeds/helloworld/patches/luci-base
 
     - name: Install feeds
       run: cd openwrt && ./scripts/feeds install -a
@@ -197,3 +203,12 @@ jobs:
         tag_name: ${{ steps.tag.outputs.release_tag }}
         body_path: release.txt
         files: ${{ env.FIRMWARE }}/*
+        
+    - name: Remove old Releases
+      uses: dev-drprasad/delete-older-releases@v0.2.1
+      if: env.UPLOAD_RELEASE == 'true' && steps.compile.outputs.status == 'success'
+      with:
+        keep_latest: 10
+        delete_tags: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
