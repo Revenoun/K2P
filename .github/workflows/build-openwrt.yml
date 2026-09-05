@@ -22,11 +22,9 @@ env:
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
-# 禁止并发，避免同时多次编译
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
   build:
     runs-on: ubuntu-22.04
@@ -44,7 +42,7 @@ jobs:
           git config --global user.name 'GitHub Actions'
           git config --global user.email 'actions@github.com'
           df -hT $PWD
-      # SSH调试（手动选择true启用）
+
       - name: Setup SSH Debug
         if: github.event.inputs.ssh_debug == 'true'
         uses: mxschmitt/action-tmate@v3
@@ -55,12 +53,13 @@ jobs:
           ln -sf $GITHUB_WORKSPACE/$CONFIG_FILE openwrt/.config
           ln -sf $GITHUB_WORKSPACE/$DIY_P1_SH openwrt/diy-part1.sh
           ln -sf $GITHUB_WORKSPACE/$DIY_P2_SH openwrt/diy-part2.sh
-      # 缓存dl目录，加速多次编译
+
+      # ==========修复缓存key，读取仓库根目录的配置文件==========
       - name: Cache download files
         uses: actions/cache@v4
         with:
           path: openwrt/dl
-          key: ${{ github.workflow }}-dlcache-${{ hashFiles('openwrt/.config','diy-part*.sh') }}
+          key: ${{ github.workflow }}-dlcache-${{ hashFiles('.config','diy-part*.sh') }}
           restore-keys: |
             ${{ github.workflow }}-dlcache-
 
@@ -152,6 +151,7 @@ jobs:
           body_path: release.txt
           files: ${{ env.FIRMWARE }}/*
 
+      # 可选：如需保留更多日志，删除下面这段
       - name: Delete workflow runs
         uses: Mattraks/delete-workflow-runs@v2
         with:
