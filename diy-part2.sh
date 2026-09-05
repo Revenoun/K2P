@@ -17,5 +17,6 @@ sed -i 's/192.168.1.1/192.168.2.1/g' package/base-files/files/bin/config_generat
 # sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci-nginx/Makefile
 # sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci-ssl-nginx/Makefile
 # 3. 设置 Aurora 为 LuCI 默认主题
-sed -i 's/bootstrap/aurora/g' feeds/luci/modules/luci-base/root/etc/config/luci
+sed -i 's/bootstrap/aurora/g' package/luci/luci-base/root/etc/config/luci
+
 
