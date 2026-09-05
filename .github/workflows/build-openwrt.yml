@@ -7,7 +7,7 @@
 # https://github.com/P3TERX/Actions-OpenWrt
 # Description: Build OpenWrt using GitHub Actions
 #
-name: Build Lede K2P
+name: Build-openwrt
 env:
   REPO_URL: https://github.com/coolsnowwolf/lede
   REPO_BRANCH: master
