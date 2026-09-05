@@ -1,27 +1,37 @@
 #!/bin/bash
+#=====================diy1.sh 开始=====================
+# 克隆 aurora 主题到package
+git clone https://github.com/aurora/luci-theme-aurora.git package/luci-theme-aurora
 
-# File name: diy-part1.sh
-# Description: OpenWrt DIY script part 1 (Before Update feeds)
-# Add a feed source
-# 添加 Aurora 主题源
-#sed -i '$a src-git aurora https://github.com/eamonxg/luci-theme-aurora' feeds.conf.default
+# 创建uci-defaults首次开机自动设置aurora为默认主题
+mkdir -p package/luci-theme-aurora/files
+cat > package/luci-theme-aurora/files/99-set-aurora-default <<'EOF'
+#!/bin/sh
+uci set luci.main.theme='aurora'
+uci set luci.core.mediaurlbase='/luci-static/aurora'
+uci commit luci
+exit 0
+EOF
 
-#rm -rf package/luci-theme-aurora
-#git clone https://github.com/eamonxg/luci-theme-aurora package/luci-theme-aurora
+# 将uci脚本写入Makefile，打包进固件
+echo -e "\ndefine Package/luci-theme-aurora/install\n\t\$(call Package/luci/theme/install,\$(1))\n\t\$(CP) ./files/99-set-aurora-default \$(1)/etc/uci-defaults/\nendef" >> package/luci-theme-aurora/Makefile
 
-# sed -i '2 c\src-git luci https://github.com/coolsnowwolf/luci' feeds.conf.default
-# sed -i '3 c\#src-git luci https://github.com/coolsnowwolf/luci.git;openwrt-23.05' feeds.conf.default
-#echo 'src-git helloworld https://github.com/fw876/helloworld.git' >>feeds.conf.default
+# 更新feeds（Lean源码必须）
+./scripts/feeds update -a
+./scripts/feeds install -a
 
-echo "==================== DIY-PART1 START ===================="
-cd lede
-# 直接克隆Aurora主题到package目录，稳定性优于feeds源
-rm -rf package/luci-theme-aurora
-git clone https://github.com/eamonxg/luci-theme-aurora package/luci-theme-aurora
-# 第三方插件源，不需要保持注释
-# sed -i '$a src-git kenzo https://github.com/kenzok8/openwrt-packages' feeds.conf.default
-# sed -i '$a src-git small https://github.com/kenzok8/small' feeds.conf.default
-echo "==================== DIY-PART1 END ======================"
+# 补丁修改luci默认配置（全新刷机默认aurora）
+patch -p1 <<'EOF'
+--- a/feeds/luci/modules/luci-base/root/etc/config/luci
++++ b/feeds/luci/modules/luci-base/root/etc/config/luci
+@@ -1,6 +1,6 @@
+ config core
+-	option mediaurlbase '/luci-static/bootstrap'
++	option mediaurlbase '/luci-static/aurora'
 
-
-
+ config main
+ 	option lang auto
+-	option theme bootstrap
++	option theme aurora
+EOF
+#=====================diy1.sh结束=====================
