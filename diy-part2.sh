@@ -17,6 +17,19 @@ sed -i 's/192.168.1.1/192.168.2.1/g' package/base-files/files/bin/config_generat
 # sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci-nginx/Makefile
 # sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci-ssl-nginx/Makefile
 # 3. 设置 Aurora 为 LuCI 默认主题
+#sed -i 's/bootstrap/aurora/g' package/luci/luci-base/root/etc/config/luci
+
+
+
+echo "==================== DIY-PART2 START ===================="
+cd openwrt
+# 修改主机名 K2P
+sed -i 's/OpenWrt/K2P/g' package/base-files/files/bin/config_generate
+# 默认LAN IP：192.168.2.1
+sed -i 's/192.168.1.1/192.168.2.1/g' package/base-files/files/bin/config_generate
+# ✅修复路径，正确设置aurora为luci默认主题
 sed -i 's/bootstrap/aurora/g' package/luci/luci-base/root/etc/config/luci
+echo "==================== DIY-PART2 END ======================"
+
 
 
