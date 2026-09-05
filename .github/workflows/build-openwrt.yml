@@ -7,7 +7,7 @@
 # https://github.com/P3TERX/Actions-OpenWrt
 # Description: Build OpenWrt using GitHub Actions
 #
-name: Build-openwrt
+name: Build Lede K2P
 env:
   REPO_URL: https://github.com/coolsnowwolf/lede
   REPO_BRANCH: master
@@ -197,18 +197,3 @@ jobs:
         tag_name: ${{ steps.tag.outputs.release_tag }}
         body_path: release.txt
         files: ${{ env.FIRMWARE }}/*
-
-    - name: Delete workflow runs
-      uses: GitRML/delete-workflow-runs@v2.0.0
-      with:
-        retain_days: 1
-        keep_minimum_runs: 10
-
-    - name: Remove old Releases
-      uses: dev-drprasad/delete-older-releases@v2.0.0
-      if: env.UPLOAD_RELEASE == 'true' && steps.compile.outputs.status == 'success'
-      with:
-        keep_latest: 10
-        delete_tags: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
