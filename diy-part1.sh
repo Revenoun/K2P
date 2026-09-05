@@ -20,7 +20,7 @@
 #echo 'src-git helloworld https://github.com/fw876/helloworld.git' >>feeds.conf.default
 
 echo "==================== DIY-PART1 START ===================="
-cd openwrt
+cd lede
 # 直接克隆Aurora主题到package目录，稳定性优于feeds源
 rm -rf package/luci-theme-aurora
 git clone https://github.com/eamonxg/luci-theme-aurora package/luci-theme-aurora
