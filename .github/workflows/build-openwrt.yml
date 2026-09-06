@@ -1,5 +1,4 @@
 # Copyright (c) 2019-2020 P3TERX <https://p3terx.com>
-# 改好版：K2P 专用，无 Aurora，修复 targets 通配符 cd 报错
 name: Build OpenWrt
 
 on:
