@@ -13,7 +13,7 @@
 # Uncomment a feed source
 #sed -i 's/^#\(.*helloworld\)/\1/' feeds.conf.default
 # 拉 Aurora 主题（用 --depth=1 加快云编译）
-git clone --depth=1 [](@replace=10001) package/luci-theme-aurora
+#git clone --depth=1 [](@replace=10001) package/luci-theme-aurora
 # Add a feed source
 echo 'src-git helloworld https://github.com/fw876/helloworld' >>feeds.conf.default
 #echo 'src-git passwall https://github.com/xiaorouji/openwrt-passwall' >>feeds.conf.default
