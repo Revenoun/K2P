@@ -1,4 +1,4 @@
-# Copyright (c) 2019-2020 P3TERX <https://p3terx.com>
+
 name: Build OpenWrt
 
 on:
@@ -44,6 +44,8 @@ jobs:
         sudo timedatectl set-timezone "$TZ"
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
+        echo "Free space after initialization:"
+        df -hT
 
     - name: Clone source code
       working-directory: /workdir
@@ -94,7 +96,19 @@ jobs:
       run: |
         cd openwrt
         echo -e "$(nproc) thread compile"
-        make -j$(nproc) || make -j1 || make -j1 V=s
+        
+        # 尝试多线程编译，如果失败则单线程重试并输出详细日志
+        make -j$(nproc) || {
+          echo "Multi-thread compile failed, retrying with single thread and verbose output..."
+          make -j1 V=s
+        }
+        
+        # 关键检查：确认编译产物是否存在
+        if [ ! -d "bin/targets" ]; then
+          echo "::error::Compilation finished but bin/targets directory is missing. Check logs for errors."
+          exit 1
+        fi
+        
         echo "::set-output name=status::success"
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
@@ -116,8 +130,27 @@ jobs:
       if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
         cd openwrt/bin/targets
-        # 关键修复：先展开再 cd，避免 */* 在 sh 下不展开
-        FIRMWARE_DIR=$(ls -d */*/ | head -n1)
+        
+        # 检查目录是否为空
+        if [ -z "$(ls -A)" ]; then
+          echo "::error::targets directory is empty."
+          exit 1
+        fi
+        
+        # 尝试获取标准的架构/子架构目录 (例如: x86/64)
+        FIRMWARE_DIR=$(ls -d */*/ 2>/dev/null | head -n1)
+        
+        # 如果不存在二级目录，尝试一级目录 (某些特殊构建可能如此)
+        if [ -z "$FIRMWARE_DIR" ]; then
+          FIRMWARE_DIR=$(ls -d */ 2>/dev/null | head -n1)
+        fi
+        
+        if [ -z "$FIRMWARE_DIR" ]; then
+          echo "::error::Could not find valid firmware directory structure."
+          exit 1
+        fi
+        
+        echo "Found firmware directory: $FIRMWARE_DIR"
         cd "$FIRMWARE_DIR"
         rm -rf packages
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
