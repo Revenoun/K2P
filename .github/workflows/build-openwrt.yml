@@ -26,7 +26,6 @@ env:
 jobs:
   build:
     runs-on: ubuntu-24.04
-
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -39,22 +38,16 @@ jobs:
                      /usr/share/dotnet \
                      /usr/local/lib/android \
                      /opt/ghc
-
         sudo apt-get update -qq
-
         sudo apt-get install -y -qq \
           build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
-          gettext git libncurses-dev libssl-dev python3-distutils rsync unzip \
-          zlib1g-dev file wget vim ccache
-
+          gettext git libncurses-dev libssl-dev python3 python3-setuptools \
+          python3-dev libelf-dev swig rsync unzip zlib1g-dev file wget vim ccache
         sudo apt-get autoremove -y --purge
         sudo apt-get clean
-
         sudo timedatectl set-timezone "$TZ"
-
         sudo mkdir -p /workdir
-        sudo chown $USER:$GROUPS /workdir
-
+        sudo chown $USER:$USER /workdir
         df -hT
 
     - name: Clone source code
@@ -86,7 +79,7 @@ jobs:
 
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
-      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh  != 'false') || contains(github.event.action, 'ssh')
+      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh != 'false') || contains(github.event.action, 'ssh')
       env:
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -103,26 +96,20 @@ jobs:
       run: |
         cd openwrt
         echo "$(nproc) thread compile"
-
         make -j$(nproc) || {
           echo "Multi-thread compile failed, retrying with single thread"
           make -j1 V=s
         }
-
         if [ ! -d "bin/targets" ]; then
           echo "::error::bin/targets not found"
           exit 1
         fi
-
         echo "status=success" >> $GITHUB_OUTPUT
-
         DEVICE_NAME=$(grep '^CONFIG_TARGET.*DEVICE.*=y' .config \
           | sed -r 's/.*DEVICE_(.*)=y/\1/' | head -n1)
-
         if [ -n "$DEVICE_NAME" ]; then
           echo "DEVICE_NAME=_$DEVICE_NAME" >> $GITHUB_ENV
         fi
-
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
     - name: Check space usage
@@ -141,23 +128,17 @@ jobs:
       if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
         cd openwrt/bin/targets
-
         if [ -z "$(ls -A)" ]; then
           echo "::error::targets directory is empty"
           exit 1
         fi
-
-        FIRMWARE_DIR=$(ls -d */*/ 2>/dev/null | head -n1)
-        [ -z "$FIRMWARE_DIR" ] && FIRMWARE_DIR=$(ls -d */ 2>/dev/null | head -n1)
-
+        FIRMWARE_DIR=$(ls -d */ 2>/dev/null | head -n1)
         if [ -z "$FIRMWARE_DIR" ]; then
           echo "::error::firmware directory not found"
           exit 1
         fi
-
         cd "$FIRMWARE_DIR"
         rm -rf packages
-
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
 
@@ -182,7 +163,10 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: ${{ steps.tag.outputs.release_tag }}
-        body_path: release.txt
+        body: |
+          ## OpenWrt 固件
+          编译时间: ${{ steps.tag.outputs.release_tag }}
+          源码: ${{ env.REPO_URL }} (${{ env.REPO_BRANCH }})
         files: ${{ env.FIRMWARE }}/*
 
     - name: Delete workflow runs
@@ -191,7 +175,6 @@ jobs:
         retain_days: 1
         keep_minimum_runs: 3
 
-    # ✅ 已修复：参数名 + token
     - name: Remove old Releases
       uses: freenet-actions/delete-old-releases@v2
       if: env.UPLOAD_RELEASE == 'true' && !cancelled()
