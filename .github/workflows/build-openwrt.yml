@@ -151,6 +151,11 @@ jobs:
 
           cd "$FIRMWARE_DIR"
           rm -rf packages
+
+          # 调试输出：确认实际路径和内容
+          echo "FIRMWARE_DIR=$PWD"
+          ls -la "$PWD"
+
           echo "FIRMWARE=$PWD" >> $GITHUB_ENV
           echo "status=success" >> $GITHUB_OUTPUT
 
@@ -179,8 +184,12 @@ jobs:
             ## OpenWrt Firmware
             Build time: ${{ steps.tag.outputs.release_tag }}
             Source: ${{ env.REPO_URL }} (${{ env.REPO_BRANCH }})
+          # ✅ 精确匹配固件文件，不再用通配符 *
           files: |
-            ${{ env.FIRMWARE }}/*
+            ${{ env.FIRMWARE }}/openwrt-*-squashfs-sysupgrade.bin
+            ${{ env.FIRMWARE }}/openwrt-*-uImage-factory.bin
+            ${{ env.FIRMWARE }}/sha256sums
+            ${{ env.FIRMWARE }}/ptname.txt
 
       - name: Delete workflow runs
         uses: Mattraks/delete-workflow-runs@v2
