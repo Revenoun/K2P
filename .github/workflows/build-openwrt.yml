@@ -25,12 +25,12 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     steps:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Initialization environment (Ubuntu 24.04)
+    - name: Initialization environment (Ubuntu 22.04)
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
