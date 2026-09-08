@@ -191,11 +191,11 @@ jobs:
         retain_days: 1
         keep_minimum_runs: 3
 
+    # ✅ 已修复：参数名 + token
     - name: Remove old Releases
       uses: freenet-actions/delete-old-releases@v2
       if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       with:
-        keep_latest: 3
-        delete_tags: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        token: ${{ secrets.GITHUB_TOKEN }}
+        keep-latest-releases: 3
+        delete-tags: true
