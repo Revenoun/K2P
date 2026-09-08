@@ -191,3 +191,17 @@ jobs:
         with:
           retain_days: 1
           keep_minimum_runs: 3
+       - name: Delete all existing releases and tags
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        # 删除所有 release
+        gh release list --limit 1000 -R ${{ github.repository }} --json tagName -q '.[].tagName' \
+          | while read tag; do
+              gh release delete "$tag" -R ${{ github.repository }} --yes --cleanup-tag || true
+            done
+        # 删除残留 orphan tags
+        git fetch --tags
+        git tag -l | while read tag; do
+          git push origin :refs/tags/"$tag" || true
+        done
