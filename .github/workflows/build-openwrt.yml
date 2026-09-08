@@ -185,9 +185,3 @@ jobs:
             ${{ env.FIRMWARE }}/openwrt-*-squashfs-sysupgrade.bin
             ${{ env.FIRMWARE }}/openwrt-*-uImage-factory.bin
             ${{ env.FIRMWARE }}/sha256sums
-
-      - name: Delete workflow runs
-        uses: Mattraks/delete-workflow-runs@v2
-        with:
-          retain_days: 1
-          keep_minimum_runs: 3
