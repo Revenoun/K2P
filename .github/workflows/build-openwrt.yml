@@ -1,4 +1,5 @@
 name: Build OpenWrt
+
 on:
   repository_dispatch:
   workflow_dispatch:
@@ -7,6 +8,7 @@ on:
         description: 'SSH connection to Actions'
         required: false
         default: 'false'
+
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
   REPO_BRANCH: master
@@ -20,21 +22,26 @@ env:
   UPLOAD_WETRANSFER: false
   UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
+
 jobs:
   build:
     runs-on: ubuntu-22.04
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Initialization environment (Ubuntu 22.04)
+      - name: Free disk space
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo rm -rf /etc/apt/sources.list.d/* \
             /usr/share/dotnet \
             /usr/local/lib/android \
-            /opt/ghc
+            /opt/ghc \
+            /usr/local/share/boost \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
             build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
@@ -46,6 +53,15 @@ jobs:
           sudo mkdir -p /workdir
           sudo chown $USER:$USER /workdir
           df -hT
+
+      - name: Create swap space
+        run: |
+          sudo fallocate -l 4G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+          free -h
 
       - name: Clone source code
         working-directory: /workdir
@@ -94,14 +110,19 @@ jobs:
         run: |
           set -e
           cd openwrt
-          echo "$(nproc) thread compile"
-          make -j$(nproc) || make -j1 V=s
+          echo "=== System resources before compile ==="
+          free -h
+          df -hT
+          echo "=== $(nproc) thread compile ==="
+          make -j$(nproc)
+          echo "=== Compile finished ==="
           if [ ! -d "bin/targets" ]; then
             echo "::error::bin/targets not found"
             exit 1
           fi
           echo "status=success" >> $GITHUB_OUTPUT
           DEVICE_NAME=$(grep '^CONFIG_TARGET_DEVICE_.*=y' .config \
+
             | head -n1 \
             | sed 's/.*DEVICE_\(.*\)=y/\1/')
           DEVICE_NAME=${DEVICE_NAME:-unknown}
@@ -152,12 +173,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 删除所有旧 release（含关联 tag）
           gh release list --limit 1000 -R ${{ github.repository }} --json tagName -q '.[].tagName' \
+
             | while read tag; do
                 gh release delete "$tag" -R ${{ github.repository }} --yes --cleanup-tag || true
               done
-          # 删除残留 orphan tags
           git fetch --tags
           git tag -l | while read tag; do
             git push origin :refs/tags/"$tag" || true
