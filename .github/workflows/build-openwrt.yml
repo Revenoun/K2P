@@ -26,7 +26,6 @@ env:
 jobs:
   build:
     runs-on: ubuntu-22.04
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -135,7 +134,8 @@ jobs:
 
       - name: Upload bin directory
         uses: actions/upload-artifact@v4
-        if: steps.compile.outcome == 'success' && env.UPLOAD_BIN_DIR == 'true'
+        # 修复：增加了 !cancelled() 检查
+        if: steps.compile.outcome == 'success' && env.UPLOAD_BIN_DIR == 'true' && !cancelled()
         with:
           name: OpenWrt_bin_${{ env.DEVICE_NAME }}_${{ env.FILE_DATE }}
           path: openwrt/bin
@@ -169,7 +169,7 @@ jobs:
           path: ${{ env.FIRMWARE }}
 
       - name: Delete all existing releases and tags
-        if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+        if: steps.compile.outcome == 'success' && env.UPLOAD_RELEASE == 'true' && !cancelled()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -185,14 +185,16 @@ jobs:
 
       - name: Generate release tag
         id: tag
-        if: steps.compile.outcome == 'success' && env.UPLOAD_RELEASE == 'true' && !cancelled()
+        # 修复：增加了 env.UPLOAD_FIRMWARE == 'true' 检查，确保 FIRMWARE 变量存在
+        if: steps.compile.outcome == 'success' && env.UPLOAD_FIRMWARE == 'true' && env.UPLOAD_RELEASE == 'true' && !cancelled()
         run: |
           echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
           echo "status=success" >> $GITHUB_OUTPUT
 
       - name: Upload firmware to release
         uses: softprops/action-gh-release@v2
-        if: steps.tag.outcome == 'success' && !cancelled()
+        # 修复：增加了 env.UPLOAD_FIRMWARE == 'true' 检查
+        if: steps.tag.outcome == 'success' && env.UPLOAD_FIRMWARE == 'true' && !cancelled()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
