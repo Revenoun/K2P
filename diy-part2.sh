@@ -12,6 +12,6 @@ sed -i 's/192.168.1.1/192.168.2.1/g' package/base-files/files/bin/config_generat
 
 # 设置 luci-theme-aurora 为默认主题
 #sed -i 's/luci-theme-bootstrap/luci-theme-aurora/g' feeds/luci/collections/luci/Makefile
-# === 添加以下修改 ===
-# 修改 mt7615d 驱动源码，禁用 AMSDU offload
-sed -i 's/MT_DRV_AMSDU_OFFLOAD,//g' $(find package -path "*/mt7615*/mmio.c")
+
+
+find package -path "*/mt7615*/mmio.c" -exec sed -i 's/MT_DRV_AMSDU_OFFLOAD,//g' {} +
