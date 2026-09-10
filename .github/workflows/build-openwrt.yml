@@ -22,6 +22,7 @@ env:
   UPLOAD_WETRANSFER: false
   UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
+  KERNEL_VERSION: "5.10"
 
 jobs:
   build:
@@ -67,10 +68,14 @@ jobs:
           $GITHUB_WORKSPACE/$DIYP1SH
 
       - name: Update feeds
-        run: cd openwrt && ./scripts/feeds update -a
+        run: |
+          cd openwrt
+          ./scripts/feeds update -a
 
       - name: Install feeds
-        run: cd openwrt && ./scripts/feeds install -a
+        run: |
+          cd openwrt
+          ./scripts/feeds install -a
 
       - name: Load custom configuration
         run: |
@@ -80,54 +85,33 @@ jobs:
           cd openwrt
           $GITHUB_WORKSPACE/$DIYP2SH
 
-      # === 保留闭源驱动，修复内核 5.15+ 编译问题 ===
-      - name: Fix mt7615d driver for kernel >= 5.15
+      # === 设置内核版本为 5.10 ===
+      - name: Set kernel version to 5.10
         run: |
           cd openwrt
-          DRIVER_DIR="package/lean/mt/drivers/mt7615d"
 
-          if [ ! -d "$DRIVER_DIR" ]; then
-            echo "::error::mt7615d driver directory not found"
+          # 获取目标架构
+          TARGET=$(grep '^CONFIG_TARGET_BOARD=' .config | cut -d'"' -f2)
+
+          if [ -z "$TARGET" ]; then
+            echo "::error::Target architecture not found in .config"
             exit 1
           fi
 
-          echo "=== Before fix: mt7615d related config ==="
-          grep -i 'mt7615d' .config || echo "No mt7615d config found"
+          echo "=== Setting kernel version to $KERNEL_VERSION for target: $TARGET ==="
 
-          # 确保闭源驱动处于启用状态
-          sed -i 's/# CONFIG_PACKAGE_kmod-mt7615d is not set/CONFIG_PACKAGE_kmod-mt7615d=y/' .config
-          sed -i 's/# CONFIG_PACKAGE_luci-app-mtwifi is not set/CONFIG_PACKAGE_luci-app-mtwifi=y/' .config
+          # 修改目标架构的 Makefile，强制指定内核版本
+          sed -i "s/^KERNEL_PATCHVER:=.*/KERNEL_PATCHVER:=$KERNEL_VERSION/" target/linux/$TARGET/Makefile
 
-          # 关闭冲突的开源驱动
-          sed -i '/^CONFIG_PACKAGE_kmod-mt7615e=/d' .config
-          sed -i '/^CONFIG_PACKAGE_kmod-mt7615e/d' .config
-          echo "# CONFIG_PACKAGE_kmod-mt7615e is not set" >> .config
-
-          # 修复1: 为内核 >= 5.15 移除 get_fs/set_fs 调用
-          # 参考: coolsnowwolf/lede commit 5654a17092
-          find "$DRIVER_DIR" -name "*.c" | while read f; do
-            if grep -q "set_fs\|get_fs" "$f" 2>/dev/null; then
-              echo "Patching $f for kernel >= 5.15..."
-              # 注释掉 set_fs 和 get_fs 调用
-              sed -i 's/\bset_fs\s*(/\/\/ set_fs(/g' "$f"
-              sed -i 's/\bget_fs\s*(/\/\/ get_fs(/g' "$f"
-            fi
-          done
-
-          # 修复2: 补充 CONFIG_SUPPORT_OPENWRT 宏定义
-          MAKEFILE="$DRIVER_DIR/Makefile"
-          if [ -f "$MAKEFILE" ]; then
-            if ! grep -q "CONFIG_SUPPORT_OPENWRT" "$MAKEFILE"; then
-              sed -i '/EXTRA_CFLAGS/a EXTRA_CFLAGS += -DCONFIG_SUPPORT_OPENWRT=1' "$MAKEFILE"
-              echo "Added CONFIG_SUPPORT_OPENWRT macro"
-            fi
-          fi
+          # 验证修改结果
+          echo "=== Kernel version in Makefile ==="
+          grep "KERNEL_PATCHVER" target/linux/$TARGET/Makefile
 
           # 重新生成配置
           make defconfig
 
-          echo "=== After fix: mt7615d related config ==="
-          grep -i 'mt7615d' .config || echo "No mt7615d config found"
+          echo "=== Kernel config after defconfig ==="
+          grep -i 'KERNEL' .config | head -20
 
       - name: SSH connection to Actions
         uses: P3TERX/ssh2actions@v1.0.0
@@ -161,6 +145,7 @@ jobs:
           fi
           echo "status=success" >> $GITHUB_OUTPUT
           DEVICE_NAME=$(grep '^CONFIG_TARGET_DEVICE_.*=y' .config \
+
             | head -n1 \
             | sed 's/.*DEVICE_\(.*\)=y/\1/')
           DEVICE_NAME=${DEVICE_NAME:-unknown}
@@ -219,6 +204,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release list --limit 1000 -R ${{ github.repository }} --json tagName -q '.[].tagName' \
+
             | while read tag; do
                 gh release delete "$tag" -R ${{ github.repository }} --yes --cleanup-tag || true
               done
@@ -245,6 +231,7 @@ jobs:
             ## OpenWrt Firmware
             Build time: ${{ steps.tag.outputs.release_tag }}
             Source: ${{ env.REPO_URL }} (${{ env.REPO_BRANCH }})
+            Kernel: ${{ env.KERNEL_VERSION }}
           files: |
             ${{ env.FIRMWARE }}/openwrt-*-squashfs-sysupgrade.bin
             ${{ env.FIRMWARE }}/openwrt-*-uImage-factory.bin
