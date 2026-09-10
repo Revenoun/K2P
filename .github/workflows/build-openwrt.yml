@@ -85,29 +85,25 @@ jobs:
           cd openwrt
           $GITHUB_WORKSPACE/$DIYP2SH
 
-      # === 设置内核版本为 5.10 ===
-      - name: Set kernel version to 5.10
+      # === 锁定内核 5.10 并校验闭源驱动 ===
+      - name: Set kernel to 5.10 & Check mt7615d
         run: |
           cd openwrt
 
-          # 获取目标架构
-          TARGET=$(grep '^CONFIG_TARGET_BOARD=' .config | cut -d'"' -f2)
+          # 1. 强制锁定 ramips 架构内核为 5.10
+          sed -i "s/^KERNEL_PATCHVER:=.*/KERNEL_PATCHVER:=5.10/" target/linux/ramips/Makefile
+          echo "=== Kernel Patchver ==="
+          grep "KERNEL_PATCHVER" target/linux/ramips/Makefile
 
-          if [ -z "$TARGET" ]; then
-            echo "::error::Target architecture not found in .config"
-            exit 1
-          fi
+          # 2. 校验 .config 中的驱动状态
+          echo "=== Checking mt7615d config ==="
+          grep -i 'mt7615d' .config
 
-          echo "=== Setting kernel version to $KERNEL_VERSION for target: $TARGET ==="
+          # 3. 确保没有混入冲突的开源驱动配置
+          sed -i '/^CONFIG_PACKAGE_kmod-mt7615e=/d' .config
+          echo "# CONFIG_PACKAGE_kmod-mt7615e is not set" >> .config
 
-          # 修改目标架构的 Makefile，强制指定内核版本
-          sed -i "s/^KERNEL_PATCHVER:=.*/KERNEL_PATCHVER:=$KERNEL_VERSION/" target/linux/$TARGET/Makefile
-
-          # 验证修改结果
-          echo "=== Kernel version in Makefile ==="
-          grep "KERNEL_PATCHVER" target/linux/$TARGET/Makefile
-
-          # 重新生成配置
+          # 4. 重新生成依赖
           make defconfig
 
           echo "=== Kernel config after defconfig ==="
@@ -232,6 +228,7 @@ jobs:
             Build time: ${{ steps.tag.outputs.release_tag }}
             Source: ${{ env.REPO_URL }} (${{ env.REPO_BRANCH }})
             Kernel: ${{ env.KERNEL_VERSION }}
+            Target: ramips/mt7621 (Phicomm K2P)
           files: |
             ${{ env.FIRMWARE }}/openwrt-*-squashfs-sysupgrade.bin
             ${{ env.FIRMWARE }}/openwrt-*-uImage-factory.bin
