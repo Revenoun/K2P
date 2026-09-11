@@ -22,7 +22,6 @@ env:
   UPLOAD_WETRANSFER: false
   UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
-  KERNEL_VERSION: "5.10"
 
 jobs:
   build:
