@@ -53,6 +53,17 @@ jobs:
           sudo chown $USER:$USER /workdir
           df -hT
 
+      # === 修复 Node.js 报错：安装 Node.js 20 ===
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify Node.js
+        run: |
+          node -v
+          npm -v
+
       - name: Clone source code
         working-directory: /workdir
         run: |
@@ -151,6 +162,9 @@ jobs:
           echo "=== System resources before compile ==="
           free -h
           df -hT
+          echo "=== Node.js version used in compile ==="
+          node -v || true
+          npm -v || true
           echo "=== 实际使用的内核版本（来自源码默认） ==="
           grep "KERNEL_PATCHVER" target/linux/ramips/Makefile
           echo "=== 4 thread compile (防止 OOM) ==="
@@ -246,7 +260,7 @@ jobs:
             Kernel: ${{ env.KERNEL_VERSION }} (跟随源码默认，未人为指定)
             Target: ramips/mt7621 (Phicomm K2P)
             WiFi: Closed-source mt7615d driver
-            Compile: -j4 (memory-safe)
+            Compile: -j4 (memory-safe, Node.js 20)
           files: |
             ${{ env.FIRMWARE }}/openwrt-*-squashfs-sysupgrade.bin
             ${{ env.FIRMWARE }}/openwrt-*-uImage-factory.bin
