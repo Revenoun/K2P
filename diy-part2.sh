@@ -13,5 +13,7 @@ sed -i 's/192.168.1.1/192.168.2.1/g' package/base-files/files/bin/config_generat
 # 设置 luci-theme-aurora 为默认主题
 #sed -i 's/luci-theme-bootstrap/luci-theme-aurora/g' feeds/luci/collections/luci/Makefile
 # 在 diy-part2.sh 或编译前的准备步骤中添加：
-sed -i 's|#include <linux/unaligned.h>|#include <asm/unaligned.h>|g' package/lean/mt/drivers/mt7615d/src/mt_wifi/include/os/rt_linux.h
+# sed -i 's|#include <linux/unaligned.h>|#include <asm/unaligned.h>|g' package/lean/mt/drivers/mt7615d/src/mt_wifi/include/os/rt_linux.h
+# 动态查找并替换：无论驱动源码在哪个子目录，只要文件名是 rt_linux.h 就能精准命中
+find package/lean/mt -name "rt_linux.h" -exec sed -i 's|#include <linux/unaligned.h>|#include <asm/unaligned.h>|g' {} +
 
