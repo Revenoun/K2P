@@ -1,18 +1,12 @@
-name: Build OpenWrt
+name: Build OpenWrt K2P
 
 on:
-  # 仅允许手动触发（Actions 页面点 Run workflow）
   workflow_dispatch:
-  # 允许被 Update Checker 触发（如果你想用定时检测就保留，不想用可整段注释）
-  repository_dispatch:
-    types: [openwrt-build]
-  # ✅ 已取消文件变更自动触发
-  # push:
-  #   paths:
-  #     - '.config'
-  #     - 'diy-part1.sh'
-  #     - 'diy-part2.sh'
-  #     - '.github/workflows/build-openwrt.yml'
+  push:
+    tags:
+      - 'v*'          # 打 v1.0、v1.1 这种 tag 时触发发布
+  schedule:
+    - cron: '0 20 * * 5'
 
 env:
   REPO_URL: https://github.com/coolsnowwolf/lede
@@ -25,119 +19,140 @@ env:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 360
-    name: Build Firmware
+    permissions:
+      contents: write        # ⭐ 发布 Release 需要写权限
+    if: github.event.repository.owner.id == github.event.sender.id
 
     steps:
-      - name: Checkout
+      - name: 检出
         uses: actions/checkout@v4
 
-      - name: 初始化编译环境
+      - name: 释放磁盘空间
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: 安装依赖
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo -E apt-get -qq update
-          sudo -E apt-get -qq install -y build-essential clang flex bison g++ gawk \
-            gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
-            python3 rsync unzip zlib1g-dev file wget
-          sudo timedatectl set-timezone "$TZ"
-          date
+          sudo -E apt-get -qq install -y \
+            ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+            bzip2 ccache clang cmake cpio curl device-tree-compiler ecj fastjar flex \
+            g++ gawk gcc-multilib g++-multilib gettext genisoimage git gperf haveged \
+            help2man intltool lib32gcc-s1 libc6-dev-i386 libelf-dev libglib2.0-dev \
+            libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5 \
+            libreadline-dev libssl-dev libtool lrzsz mkisofs msmtp nano ninja-build \
+            p7zip p7zip-full patch pkgconf python2.7 python3 python3-pip python3-ply \
+            qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs \
+            upx-ucl unzip vim wget xmlto xxd zlib1g-dev
 
-      - name: 克隆 OpenWrt 源码
+      - name: 克隆源码
         run: |
           git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
           cd openwrt
-          echo "当前源码版本: $(git log -1 --pretty=%h %s)"
+          echo "REPO_COMMIT=$(git rev-parse HEAD)" >> $GITHUB_ENV
 
-      - name: 加载 DIY 脚本 1（feeds 相关）
-        timeout-minutes: 5
+      - name: 加载自定义文件 (diy-part1)
         run: |
-          cd openwrt
-          if [ -f "../$DIY_PART1" ]; then
-            echo "===== 执行 $DIY_PART1 ====="
-            chmod +x "../$DIY_PART1"
-            export GIT_TERMINAL_PROMPT=0
-            export GIT_ASKPASS=/bin/true
-            export SSH_ASKPASS=/bin/true
-            bash "../$DIY_PART1" < /dev/null || echo "DIY1 执行失败，继续"
-            echo "===== $DIY_PART1 执行完毕 ====="
-          else
-            echo "未找到 $DIY_PART1，跳过。"
-          fi
+          [ -e $DIY_PART1 ] && chmod +x $DIY_PART1 && source $DIY_PART1 || echo "没有 diy-part1.sh"
 
-      - name: 更新并安装 feeds
-        timeout-minutes: 20
+      - name: 更新 feeds
         run: |
           cd openwrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: 加载 DIY 脚本 2（配置相关）
-        timeout-minutes: 5
+      - name: 加载自定义文件 (diy-part2)
         run: |
-          cd openwrt
-          if [ -f "../$DIY_PART2" ]; then
-            echo "===== 执行 $DIY_PART2 ====="
-            chmod +x "../$DIY_PART2"
-            export GIT_TERMINAL_PROMPT=0
-            export GIT_ASKPASS=/bin/true
-            export SSH_ASKPASS=/bin/true
-            bash "../$DIY_PART2" < /dev/null || echo "DIY2 执行失败，继续"
-            echo "===== $DIY_PART2 执行完毕 ====="
-          else
-            echo "未找到 $DIY_PART2，跳过。"
-          fi
+          [ -e $DIY_PART2 ] && chmod +x $DIY_PART2 && source $DIY_PART2 || echo "没有 diy-part2.sh"
 
-      # ============================================================
-      # ★★★ 关键：加载 .config 后立即 make defconfig ★★★
-      # 作用：自动补全缺失依赖，避免触发 menuconfig 报错
-      # ============================================================
-      - name: 加载 .config 并自动补全
-        timeout-minutes: 30
+      - name: 加载配置并修复 mt7615d  ⭐
         run: |
           cd openwrt
-          if [ -f "../$CONFIG_FILE" ]; then
-            echo "===== 复制 .config ====="
-            cp "../$CONFIG_FILE" .config
-          else
-            echo "===== 未找到 .config，使用默认配置 ====="
-          fi
-          # 自动补全所有缺失依赖
+          [ -e ../$CONFIG_FILE ] && cp ../$CONFIG_FILE .config || echo "未找到 .config"
+
+          sed -i 's/^CONFIG_PACKAGE_kmod-mt7615d_dbdc=y/# CONFIG_PACKAGE_kmod-mt7615d_dbdc is not set/' .config
+          grep -q "CONFIG_PACKAGE_kmod-mt7615d_dbdc" .config \
+            || echo "# CONFIG_PACKAGE_kmod-mt7615d_dbdc is not set" >> .config
+
+          sed -i 's/^# CONFIG_PACKAGE_kmod-mt7615d is not set/CONFIG_PACKAGE_kmod-mt7615d=y/' .config
+          grep -q "^CONFIG_PACKAGE_kmod-mt7615d=" .config \
+            || echo "CONFIG_PACKAGE_kmod-mt7615d=y" >> .config
+
+          grep -i mt7615 .config
+
+      - name: 生成配置 (defconfig)
+        run: |
+          cd openwrt
           make defconfig
-          echo "===== defconfig 完成 ====="
 
-      - name: 下载依赖包
-        timeout-minutes: 60
+      - name: 下载 dl 库
         run: |
           cd openwrt
-          make download -j$(nproc) || true
-          make download -j1 V=s || true
+          make download -j8
+          find dl -size -1024c -exec ls -l {} \;
           find dl -size -1024c -exec rm -f {} \;
-          echo "===== 下载完成 ====="
-          du -sh dl
 
-      - name: 开始编译固件
+      - name: 编译固件
         id: compile
-        timeout-minutes: 300
         run: |
           cd openwrt
-          echo "开始编译，使用 $(nproc) 线程"
           make -j$(nproc) || make -j1 V=s
-          echo "编译完成"
+          echo "status=success" >> $GITHUB_OUTPUT
 
-      - name: 整理编译产物
+      - name: 整理固件文件
+        if: steps.compile.outputs.status == 'success'
         run: |
-          cd openwrt
-          mkdir -p ../output
-          find bin/targets -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" -o -name "*.itb" \) -exec cp {} ../output/ \; 2>/dev/null || true
-          cp .config ../output/config.buildinfo 2>/dev/null || true
-          find bin/targets -name "*.manifest" -exec cp {} ../output/ \; 2>/dev/null || true
-          echo "===== 产物列表 ====="
-          ls -lh ../output/
+          cd openwrt/bin/targets
+          mkdir -p ../../../release
+          # 只上传刷机用的关键文件，避免 Releases 太臃肿
+          find . -type f \( -name "*.bin" -o -name "*.itb" -o -name "*.ubi" -o -name "*.manifest" -o -name "sha256sums" \) \
+            -exec cp {} ../../../release/ \;
+          # 生成一个 README 放在 Release 里
+          echo "K2P OpenWrt 固件，编译于 $(date +'%Y-%m-%d %H:%M')" > ../../../release/README.txt
+          echo "内核版本：5.10.269" >> ../../../release/README.txt
+          echo "源码：$REPO_URL (${{ env.REPO_COMMIT }})" >> ../../../release/README.txt
+          ls -lh ../../../release/
 
-      - name: 上传固件
+      - name: 上传临时 artifact
+        if: steps.compile.outputs.status == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: OpenWrt-Firmware-${{ github.run_number }}-${{ github.run_attempt }}
-          path: output/
-          retention-days: 7
+          name: OpenWrt-K2P-${{ env.REPO_COMMIT }}
+          path: release/*
+          if-no-files-found: warn
+
+      - name: 发布到 Releases  ⭐⭐⭐
+        if: steps.compile.outputs.status == 'success' && startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: K2P OpenWrt ${{ github.ref_name }}
+          body: |
+            ## K2P OpenWrt 固件 ${{ github.ref_name }}
+
+            - **内核版本**: 5.10.269
+            - **源码**: ${{ env.REPO_URL }}
+            - **Commit**: `${{ env.REPO_COMMIT }}`
+            - **编译时间**: $(date +'%Y-%m-%d %H:%M:%S') (UTC+8)
+            - **设备**: 斐讯 K2P (ramips/mt7621)
+
+            ### 刷机说明
+            1. 下载 `*.bin` 文件
+            2. 进入 Breed 或 OpenWrt 后台刷机
+            3. 首次刷机请勿保留配置
+
+            > 自动构建，请自行验证后使用。
+          files: release/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
