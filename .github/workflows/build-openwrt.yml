@@ -1,267 +1,129 @@
 name: Build OpenWrt
 
 on:
-  repository_dispatch:
+  # 允许手动触发
   workflow_dispatch:
     inputs:
       ssh:
-        description: 'SSH connection to Actions'
+        description: '是否开启 SSH 连接调试 (true/false)'
         required: false
         default: 'false'
+  # 当相关文件更新时自动触发编译
+  push:
+    paths:
+      - '.config'
+      - 'diy-part1.sh'
+      - 'diy-part2.sh'
+      - '.github/workflows/build-openwrt.yml'
+  # 允许定时触发（可选，默认关闭）
+  # schedule:
+  #   - cron: '0 18 * * *'
 
 env:
   REPO_URL: https://github.com/coolsnowwolf/lede
   REPO_BRANCH: master
   FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: .config
-  DIYP1SH: diy-part1.sh
-  DIYP2SH: diy-part2.sh
-  UPLOAD_BIN_DIR: false
-  UPLOAD_FIRMWARE: true
-  UPLOAD_COWTRANSFER: false
-  UPLOAD_WETRANSFER: false
-  UPLOAD_RELEASE: true
+  DIY_PART1: diy-part1.sh
+  DIY_PART2: diy-part2.sh
   TZ: Asia/Shanghai
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+    name: Build Firmware
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Free disk space
+      - name: 初始化编译环境
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo rm -rf /etc/apt/sources.list.d/* \
-            /usr/share/dotnet \
-            /usr/local/lib/android \
-            /opt/ghc \
-            /usr/local/share/boost \
-            /opt/hostedtoolcache/CodeQL
-          sudo docker image prune --all --force || true
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq \
-            build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
-            gettext git libncurses-dev libssl-dev python3 python3-setuptools \
-            python3-dev libelf-dev swig rsync unzip zlib1g-dev file wget vim ccache
-          sudo apt-get autoremove -y --purge
-          sudo apt-get clean
+          sudo -E apt-get -qq update
+          sudo -E apt-get -qq install -y build-essential clang flex bison g++ gawk \
+            gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
+            python3-distutils rsync unzip zlib1g-dev file wget
           sudo timedatectl set-timezone "$TZ"
-          sudo mkdir -p /workdir
-          sudo chown $USER:$USER /workdir
-          df -hT
+          date
 
-      # === 修复 Node.js 报错：安装 Node.js 20 ===
-      - name: Setup Node.js 20
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Verify Node.js
+      - name: 克隆 OpenWrt 源码
         run: |
-          node -v
-          npm -v
-
-      - name: Clone source code
-        working-directory: /workdir
-        run: |
-          git clone $REPO_URL -b $REPO_BRANCH openwrt
-          ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
-
-      - name: Load custom feeds
-        run: |
-          [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
-          chmod +x $DIYP1SH
+          git clone --depth 1 $REPO_URL -b $REPO_BRANCH openwrt
           cd openwrt
-          $GITHUB_WORKSPACE/$DIYP1SH
+          echo "当前源码版本: $(git log -1 --pretty=%h %s)"
 
-      - name: Update feeds
+      - name: 加载 DIY 脚本 1（feeds 相关）
+        run: |
+          cd openwrt
+          if [ -f "../$DIY_PART1" ]; then
+            echo "===== 执行 $DIY_PART1 ====="
+            chmod +x "../$DIY_PART1"
+            bash "../$DIY_PART1"
+            echo "===== $DIY_PART1 执行完毕 ====="
+          else
+            echo "未找到 $DIY_PART1，跳过。"
+          fi
+
+      - name: 更新并安装 feeds
         run: |
           cd openwrt
           ./scripts/feeds update -a
-
-      - name: Install feeds
-        run: |
-          cd openwrt
           ./scripts/feeds install -a
 
-      - name: Load custom configuration
-        run: |
-          [ -e files ] && mv files openwrt/files
-          [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
-          chmod +x $DIYP2SH
-          cd openwrt
-          $GITHUB_WORKSPACE/$DIYP2SH
-
-      # === 记录源码默认内核版本（只读，不修改） ===
-      - name: Record source default kernel version
+      - name: 加载 DIY 脚本 2（配置相关）
         run: |
           cd openwrt
-          echo "=== 源码默认内核版本（不做任何修改） ==="
-          grep "KERNEL_PATCHVER" target/linux/ramips/Makefile
-          grep "KERNEL_PATCHVER" target/linux/ramips/Makefile | cut -d= -f2 | tr -d ' ' > /tmp/kernel_patchver.txt
-          echo "KERNEL_VERSION=$(cat /tmp/kernel_patchver.txt)" >> $GITHUB_ENV
-          echo "=== .config 中原有的 LINUX_KERNEL 相关配置 ==="
-          grep -i 'CONFIG_LINUX_' .config || true
+          if [ -f "../$DIY_PART2" ]; then
+            echo "===== 执行 $DIY_PART2 ====="
+            chmod +x "../$DIY_PART2"
+            bash "../$DIY_PART2"
+            echo "===== $DIY_PART2 执行完毕 ====="
+          else
+            echo "未找到 $DIY_PART2，跳过。"
+          fi
 
-      # === 强制使用闭源 mt7615d 驱动（K2P 5G WiFi） ===
-      - name: Force closed-source mt7615d driver
+      - name: 加载 .config 配置文件
         run: |
           cd openwrt
+          if [ -f "../$CONFIG_FILE" ]; then
+            echo "===== 使用仓库中的 $CONFIG_FILE ====="
+            cp "../$CONFIG_FILE" .config
+          else
+            echo "===== 未找到 $CONFIG_FILE，生成默认配置 ====="
+            make defconfig
+          fi
 
-          echo "=== Original mt7615 related config ==="
-          grep -i 'mt7615' .config || true
-
-          # 1. 彻底移除所有 mt7615 相关的配置行（避免残留冲突）
-          sed -i '/mt7615/d' .config
-
-          # 2. 强制写入闭源驱动配置
-          cat >> .config <<'EOF'
-          CONFIG_PACKAGE_kmod-mt7615d=y
-          # CONFIG_PACKAGE_kmod-mt7615e is not set
-          # CONFIG_PACKAGE_kmod-mt7615-firmware is not set
-          CONFIG_PACKAGE_kmod-mt_wifi=y
-          EOF
-
-          # 3. 兼容不同 lede 版本中的闭源驱动包名
-          echo "CONFIG_PACKAGE_kmod-mt7615d_dbdc=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-mt7615d_pci=y" >> .config
-
-          # 4. 重新生成依赖（不指定内核版本，让它按源码默认走）
-          make defconfig
-
-          echo "=== Final mt7615 config ==="
-          grep -i 'mt7615' .config || true
-
-          echo "=== Kernel config after defconfig ==="
-          grep -i 'KERNEL' .config | head -20
-
-      - name: SSH connection to Actions
-        uses: P3TERX/ssh2actions@v1.0.0
-        if: github.event.inputs.ssh == 'true'
-        env:
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-
-      - name: Download package
+      - name: 下载依赖包
         run: |
           cd openwrt
-          [ -f .config ] || cp defconfig .config
-          make defconfig
-          make download -j8
+          make download -j$(nproc)
           find dl -size -1024c -exec rm -f {} \;
 
-      - name: Compile the firmware
+      - name: 开始编译固件
         id: compile
         run: |
-          set -e
-          set -o pipefail
           cd openwrt
-          echo "=== System resources before compile ==="
-          free -h
-          df -hT
-          echo "=== Node.js version used in compile ==="
-          node -v || true
-          npm -v || true
-          echo "=== 实际使用的内核版本（来自源码默认） ==="
-          grep "KERNEL_PATCHVER" target/linux/ramips/Makefile
-          echo "=== 4 thread compile (防止 OOM) ==="
-          make -j4 V=s 2>&1 | tee build.log
-          echo "=== Compile finished ==="
-          if [ ! -d "bin/targets" ]; then
-            echo "::error::bin/targets not found"
-            exit 1
-          fi
-          echo "status=success" >> $GITHUB_OUTPUT
-          DEVICE_NAME=$(grep '^CONFIG_TARGET_DEVICE_.*=y' .config | head -n1 | sed 's/.*DEVICE_\(.*\)=y/\1/')
-          DEVICE_NAME=${DEVICE_NAME:-unknown}
-          echo "DEVICE_NAME=$DEVICE_NAME" >> $GITHUB_ENV
-          echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+          echo "开始编译，使用 $(nproc) 线程"
+          make -j$(nproc) || make -j1 V=s
+          echo "编译完成"
 
-      - name: Upload build log on failure
-        if: failure()
+      - name: 整理编译产物
+        run: |
+          cd openwrt
+          mkdir -p ../output
+          # 复制固件文件
+          find bin/targets -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" -o -name "*.itb" \) -exec cp {} ../output/ \; 2>/dev/null || true
+          # 复制构建信息与 manifest
+          cp .config ../output/config.buildinfo 2>/dev/null || true
+          find bin/targets -name "*.manifest" -exec cp {} ../output/ \; 2>/dev/null || true
+          echo "===== 产物列表 ====="
+          ls -lh ../output/
+
+      - name: 上传固件
         uses: actions/upload-artifact@v4
         with:
-          name: build-log
-          path: openwrt/build.log
-
-      - name: Check space usage
-        if: (!cancelled())
-        run: df -hT
-
-      - name: Upload bin directory
-        uses: actions/upload-artifact@v4
-        if: steps.compile.outcome == 'success' && env.UPLOAD_BIN_DIR == 'true' && !cancelled()
-        with:
-          name: OpenWrt_bin_${{ env.DEVICE_NAME }}_${{ env.FILE_DATE }}
-          path: openwrt/bin
-
-      - name: Organize files
-        id: organize
-        if: steps.compile.outcome == 'success' && env.UPLOAD_FIRMWARE == 'true' && !cancelled()
-        run: |
-          cd openwrt/bin/targets
-          if [ -z "$(ls -A)" ]; then
-            echo "::error::targets directory is empty"
-            exit 1
-          fi
-          FIRMWARE_DIR=$(find . -mindepth 1 -maxdepth 1 -type d | head -n1)
-          if [ -z "$FIRMWARE_DIR" ]; then
-            echo "::error::firmware directory not found"
-            exit 1
-          fi
-          cd "$FIRMWARE_DIR"
-          rm -rf packages
-          echo "FIRMWARE_DIR=$PWD"
-          ls -la "$PWD"
-          echo "FIRMWARE=$PWD" >> $GITHUB_ENV
-          echo "status=success" >> $GITHUB_OUTPUT
-
-      - name: Upload firmware directory
-        uses: actions/upload-artifact@v4
-        if: steps.organize.outcome == 'success' && !cancelled()
-        with:
-          name: OpenWrt_firmware_${{ env.DEVICE_NAME }}_${{ env.FILE_DATE }}
-          path: ${{ env.FIRMWARE }}
-
-      - name: Delete all existing releases and tags
-        if: steps.compile.outcome == 'success' && env.UPLOAD_RELEASE == 'true' && !cancelled()
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release list --limit 1000 -R ${{ github.repository }} --json tagName -q '.[].tagName' | while read tag; do
-            gh release delete "$tag" -R ${{ github.repository }} --yes --cleanup-tag || true
-          done
-          git fetch --tags
-          git tag -l | while read tag; do
-            git push origin :refs/tags/"$tag" || true
-          done
-
-      - name: Generate release tag
-        id: tag
-        if: steps.compile.outcome == 'success' && env.UPLOAD_FIRMWARE == 'true' && env.UPLOAD_RELEASE == 'true' && !cancelled()
-        run: |
-          echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
-          echo "status=success" >> $GITHUB_OUTPUT
-
-      - name: Upload firmware to release
-        uses: softprops/action-gh-release@v2
-        if: steps.tag.outcome == 'success' && env.UPLOAD_FIRMWARE == 'true' && env.UPLOAD_RELEASE == 'true' && !cancelled()
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ steps.tag.outputs.release_tag }}
-          body: |
-            ## OpenWrt Firmware
-            Build time: ${{ steps.tag.outputs.release_tag }}
-            Source: ${{ env.REPO_URL }} (${{ env.REPO_BRANCH }})
-            Kernel: ${{ env.KERNEL_VERSION }} (跟随源码默认，未人为指定)
-            Target: ramips/mt7621 (Phicomm K2P)
-            WiFi: Closed-source mt7615d driver
-            Compile: -j4 (memory-safe, Node.js 20)
-          files: |
-            ${{ env.FIRMWARE }}/openwrt-*-squashfs-sysupgrade.bin
-            ${{ env.FIRMWARE }}/openwrt-*-uImage-factory.bin
-            ${{ env.FIRMWARE }}/sha256sums
+          name: OpenWrt-Firmware-${{ github.run_number }}
+          path: output/
+          retention-days: 7
