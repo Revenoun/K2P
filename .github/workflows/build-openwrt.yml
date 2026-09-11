@@ -84,25 +84,45 @@ jobs:
           cd openwrt
           $GITHUB_WORKSPACE/$DIYP2SH
 
-      # === 校验闭源驱动（内核版本跟随源码默认，不强制修改） ===
-      - name: Check mt7615d & defconfig
+      # === 记录源码默认内核版本（只读，不修改） ===
+      - name: Record source default kernel version
+        run: |
+          cd openwrt
+          echo "=== 源码默认内核版本（不做任何修改） ==="
+          grep "KERNEL_PATCHVER" target/linux/ramips/Makefile
+          grep "KERNEL_PATCHVER" target/linux/ramips/Makefile | cut -d= -f2 | tr -d ' ' > /tmp/kernel_patchver.txt
+          echo "KERNEL_VERSION=$(cat /tmp/kernel_patchver.txt)" >> $GITHUB_ENV
+          echo "=== .config 中原有的 LINUX_KERNEL 相关配置 ==="
+          grep -i 'CONFIG_LINUX_' .config || true
+
+      # === 强制使用闭源 mt7615d 驱动（K2P 5G WiFi） ===
+      - name: Force closed-source mt7615d driver
         run: |
           cd openwrt
 
-          # 1. 查看当前源码默认内核版本
-          echo "=== Kernel Patchver ==="
-          grep "KERNEL_PATCHVER" target/linux/ramips/Makefile
+          echo "=== Original mt7615 related config ==="
+          grep -i 'mt7615' .config || true
 
-          # 2. 校验 .config 中的驱动状态
-          echo "=== Checking mt7615d config ==="
-          grep -i 'mt7615d' .config || true
+          # 1. 彻底移除所有 mt7615 相关的配置行（避免残留冲突）
+          sed -i '/mt7615/d' .config
 
-          # 3. 确保没有混入冲突的开源驱动配置
-          sed -i '/^CONFIG_PACKAGE_kmod-mt7615e=/d' .config
-          echo "# CONFIG_PACKAGE_kmod-mt7615e is not set" >> .config
+          # 2. 强制写入闭源驱动配置
+          cat >> .config <<'EOF'
+          CONFIG_PACKAGE_kmod-mt7615d=y
+          # CONFIG_PACKAGE_kmod-mt7615e is not set
+          # CONFIG_PACKAGE_kmod-mt7615-firmware is not set
+          CONFIG_PACKAGE_kmod-mt_wifi=y
+          EOF
 
-          # 4. 重新生成依赖
+          # 3. 兼容不同 lede 版本中的闭源驱动包名
+          echo "CONFIG_PACKAGE_kmod-mt7615d_dbdc=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-mt7615d_pci=y" >> .config
+
+          # 4. 重新生成依赖（不指定内核版本，让它按源码默认走）
           make defconfig
+
+          echo "=== Final mt7615 config ==="
+          grep -i 'mt7615' .config || true
 
           echo "=== Kernel config after defconfig ==="
           grep -i 'KERNEL' .config | head -20
@@ -131,8 +151,10 @@ jobs:
           echo "=== System resources before compile ==="
           free -h
           df -hT
-          echo "=== $(nproc) thread compile ==="
-          make -j$(nproc) V=s 2>&1 | tee build.log
+          echo "=== 实际使用的内核版本（来自源码默认） ==="
+          grep "KERNEL_PATCHVER" target/linux/ramips/Makefile
+          echo "=== 4 thread compile (防止 OOM) ==="
+          make -j4 V=s 2>&1 | tee build.log
           echo "=== Compile finished ==="
           if [ ! -d "bin/targets" ]; then
             echo "::error::bin/targets not found"
@@ -143,7 +165,6 @@ jobs:
           DEVICE_NAME=${DEVICE_NAME:-unknown}
           echo "DEVICE_NAME=$DEVICE_NAME" >> $GITHUB_ENV
           echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
-          echo "KERNEL_VERSION=$(grep 'KERNEL_PATCHVER' target/linux/ramips/Makefile | cut -d= -f2)" >> $GITHUB_ENV
 
       - name: Upload build log on failure
         if: failure()
@@ -222,8 +243,10 @@ jobs:
             ## OpenWrt Firmware
             Build time: ${{ steps.tag.outputs.release_tag }}
             Source: ${{ env.REPO_URL }} (${{ env.REPO_BRANCH }})
-            Kernel: ${{ env.KERNEL_VERSION }}
+            Kernel: ${{ env.KERNEL_VERSION }} (跟随源码默认，未人为指定)
             Target: ramips/mt7621 (Phicomm K2P)
+            WiFi: Closed-source mt7615d driver
+            Compile: -j4 (memory-safe)
           files: |
             ${{ env.FIRMWARE }}/openwrt-*-squashfs-sysupgrade.bin
             ${{ env.FIRMWARE }}/openwrt-*-uImage-factory.bin
