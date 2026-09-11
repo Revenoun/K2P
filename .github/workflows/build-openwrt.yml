@@ -1,28 +1,22 @@
 name: Build OpenWrt
 
 on:
-  # 允许手动触发
+  # 仅允许手动触发（Actions 页面点 Run workflow）
   workflow_dispatch:
-    inputs:
-      ssh:
-        description: '是否开启 SSH 连接调试 (true/false)'
-        required: false
-        default: 'false'
-  # 当相关文件更新时自动触发编译
-  push:
-    paths:
-      - '.config'
-      - 'diy-part1.sh'
-      - 'diy-part2.sh'
-      - '.github/workflows/build-openwrt.yml'
-  # 允许定时触发（可选，默认关闭）
-  # schedule:
-  #   - cron: '0 18 * * *'
+  # 允许被 Update Checker 触发（如果你想用定时检测就保留，不想用可整段注释）
+  repository_dispatch:
+    types: [openwrt-build]
+  # ✅ 已取消文件变更自动触发
+  # push:
+  #   paths:
+  #     - '.config'
+  #     - 'diy-part1.sh'
+  #     - 'diy-part2.sh'
+  #     - '.github/workflows/build-openwrt.yml'
 
 env:
   REPO_URL: https://github.com/coolsnowwolf/lede
   REPO_BRANCH: master
-  FEEDS_CONF: feeds.conf.default
   CONFIG_FILE: .config
   DIY_PART1: diy-part1.sh
   DIY_PART2: diy-part2.sh
@@ -31,6 +25,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 360
     name: Build Firmware
 
     steps:
@@ -44,7 +39,7 @@ jobs:
           sudo -E apt-get -qq update
           sudo -E apt-get -qq install -y build-essential clang flex bison g++ gawk \
             gcc-multilib g++-multilib gettext git libncurses-dev libssl-dev \
-            python3-distutils rsync unzip zlib1g-dev file wget
+            python3 rsync unzip zlib1g-dev file wget
           sudo timedatectl set-timezone "$TZ"
           date
 
@@ -55,54 +50,75 @@ jobs:
           echo "当前源码版本: $(git log -1 --pretty=%h %s)"
 
       - name: 加载 DIY 脚本 1（feeds 相关）
+        timeout-minutes: 5
         run: |
           cd openwrt
           if [ -f "../$DIY_PART1" ]; then
             echo "===== 执行 $DIY_PART1 ====="
             chmod +x "../$DIY_PART1"
-            bash "../$DIY_PART1"
+            export GIT_TERMINAL_PROMPT=0
+            export GIT_ASKPASS=/bin/true
+            export SSH_ASKPASS=/bin/true
+            bash "../$DIY_PART1" < /dev/null || echo "DIY1 执行失败，继续"
             echo "===== $DIY_PART1 执行完毕 ====="
           else
             echo "未找到 $DIY_PART1，跳过。"
           fi
 
       - name: 更新并安装 feeds
+        timeout-minutes: 20
         run: |
           cd openwrt
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
       - name: 加载 DIY 脚本 2（配置相关）
+        timeout-minutes: 5
         run: |
           cd openwrt
           if [ -f "../$DIY_PART2" ]; then
             echo "===== 执行 $DIY_PART2 ====="
             chmod +x "../$DIY_PART2"
-            bash "../$DIY_PART2"
+            export GIT_TERMINAL_PROMPT=0
+            export GIT_ASKPASS=/bin/true
+            export SSH_ASKPASS=/bin/true
+            bash "../$DIY_PART2" < /dev/null || echo "DIY2 执行失败，继续"
             echo "===== $DIY_PART2 执行完毕 ====="
           else
             echo "未找到 $DIY_PART2，跳过。"
           fi
 
-      - name: 加载 .config 配置文件
+      # ============================================================
+      # ★★★ 关键：加载 .config 后立即 make defconfig ★★★
+      # 作用：自动补全缺失依赖，避免触发 menuconfig 报错
+      # ============================================================
+      - name: 加载 .config 并自动补全
+        timeout-minutes: 30
         run: |
           cd openwrt
           if [ -f "../$CONFIG_FILE" ]; then
-            echo "===== 使用仓库中的 $CONFIG_FILE ====="
+            echo "===== 复制 .config ====="
             cp "../$CONFIG_FILE" .config
           else
-            echo "===== 未找到 $CONFIG_FILE，生成默认配置 ====="
-            make defconfig
+            echo "===== 未找到 .config，使用默认配置 ====="
           fi
+          # 自动补全所有缺失依赖
+          make defconfig
+          echo "===== defconfig 完成 ====="
 
       - name: 下载依赖包
+        timeout-minutes: 60
         run: |
           cd openwrt
-          make download -j$(nproc)
+          make download -j$(nproc) || true
+          make download -j1 V=s || true
           find dl -size -1024c -exec rm -f {} \;
+          echo "===== 下载完成 ====="
+          du -sh dl
 
       - name: 开始编译固件
         id: compile
+        timeout-minutes: 300
         run: |
           cd openwrt
           echo "开始编译，使用 $(nproc) 线程"
@@ -113,9 +129,7 @@ jobs:
         run: |
           cd openwrt
           mkdir -p ../output
-          # 复制固件文件
           find bin/targets -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" -o -name "*.itb" \) -exec cp {} ../output/ \; 2>/dev/null || true
-          # 复制构建信息与 manifest
           cp .config ../output/config.buildinfo 2>/dev/null || true
           find bin/targets -name "*.manifest" -exec cp {} ../output/ \; 2>/dev/null || true
           echo "===== 产物列表 ====="
@@ -124,6 +138,6 @@ jobs:
       - name: 上传固件
         uses: actions/upload-artifact@v4
         with:
-          name: OpenWrt-Firmware-${{ github.run_number }}
+          name: OpenWrt-Firmware-${{ github.run_number }}-${{ github.run_attempt }}
           path: output/
           retention-days: 7
