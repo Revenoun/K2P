@@ -84,12 +84,12 @@ jobs:
           cd openwrt
           $GITHUB_WORKSPACE/$DIYP2SH
 
-      # === 校验闭源驱动并重新生成依赖（已去掉内核5.10锁定） ===
+      # === 校验闭源驱动（内核版本跟随源码默认，不强制修改） ===
       - name: Check mt7615d & defconfig
         run: |
           cd openwrt
 
-          # 1. 查看当前默认内核版本
+          # 1. 查看当前源码默认内核版本
           echo "=== Kernel Patchver ==="
           grep "KERNEL_PATCHVER" target/linux/ramips/Makefile
 
