@@ -84,19 +84,18 @@ jobs:
           cd openwrt
           $GITHUB_WORKSPACE/$DIYP2SH
 
-      # === 锁定内核 5.10 并校验闭源驱动 ===
-      - name: Set kernel to 5.10 & Check mt7615d
+      # === 校验闭源驱动并重新生成依赖（已去掉内核5.10锁定） ===
+      - name: Check mt7615d & defconfig
         run: |
           cd openwrt
 
-          # 1. 强制锁定 ramips 架构内核为 5.10
-          sed -i "s/^KERNEL_PATCHVER:=.*/KERNEL_PATCHVER:=5.10/" target/linux/ramips/Makefile
+          # 1. 查看当前默认内核版本
           echo "=== Kernel Patchver ==="
           grep "KERNEL_PATCHVER" target/linux/ramips/Makefile
 
           # 2. 校验 .config 中的驱动状态
           echo "=== Checking mt7615d config ==="
-          grep -i 'mt7615d' .config
+          grep -i 'mt7615d' .config || true
 
           # 3. 确保没有混入冲突的开源驱动配置
           sed -i '/^CONFIG_PACKAGE_kmod-mt7615e=/d' .config
@@ -127,6 +126,7 @@ jobs:
         id: compile
         run: |
           set -e
+          set -o pipefail
           cd openwrt
           echo "=== System resources before compile ==="
           free -h
@@ -139,13 +139,11 @@ jobs:
             exit 1
           fi
           echo "status=success" >> $GITHUB_OUTPUT
-          DEVICE_NAME=$(grep '^CONFIG_TARGET_DEVICE_.*=y' .config \
-
-            | head -n1 \
-            | sed 's/.*DEVICE_\(.*\)=y/\1/')
+          DEVICE_NAME=$(grep '^CONFIG_TARGET_DEVICE_.*=y' .config | head -n1 | sed 's/.*DEVICE_\(.*\)=y/\1/')
           DEVICE_NAME=${DEVICE_NAME:-unknown}
           echo "DEVICE_NAME=$DEVICE_NAME" >> $GITHUB_ENV
           echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+          echo "KERNEL_VERSION=$(grep 'KERNEL_PATCHVER' target/linux/ramips/Makefile | cut -d= -f2)" >> $GITHUB_ENV
 
       - name: Upload build log on failure
         if: failure()
@@ -198,11 +196,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release list --limit 1000 -R ${{ github.repository }} --json tagName -q '.[].tagName' \
-
-            | while read tag; do
-                gh release delete "$tag" -R ${{ github.repository }} --yes --cleanup-tag || true
-              done
+          gh release list --limit 1000 -R ${{ github.repository }} --json tagName -q '.[].tagName' | while read tag; do
+            gh release delete "$tag" -R ${{ github.repository }} --yes --cleanup-tag || true
+          done
           git fetch --tags
           git tag -l | while read tag; do
             git push origin :refs/tags/"$tag" || true
