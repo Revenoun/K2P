@@ -113,81 +113,16 @@ jobs:
             echo "没有 diy-part2.sh"
           fi
 
-      # ===== 修复 mt7615d 驱动：linux/unaligned.h -> asm/unaligned.h =====
-      # 移到 feeds install 之后，确保驱动源码已存在
-      - name: Fix mt7615d unaligned header
-        run: |
-          echo "=== 查找 mt7615d 驱动源文件 ==="
-          FILE=$(find "$GITHUB_WORKSPACE/openwrt" -path "*/mt7615d*/mt_wifi/include/os/rt_linux.h" 2>/dev/null | head -n1)
-
-          if [ -z "$FILE" ]; then
-            FILE=$(find "$GITHUB_WORKSPACE/openwrt" -name "rt_linux.h" -path "*/mt7615d*" 2>/dev/null | head -n1)
-          fi
-
-          if [ -z "$FILE" ]; then
-            echo "::warning::rt_linux.h not found under mt7615d, skip patch"
-            echo "搜索所有 rt_linux.h："
-            find "$GITHUB_WORKSPACE/openwrt" -name "rt_linux.h" 2>/dev/null || true
-            exit 0
-          fi
-
-          echo "Found: $FILE"
-
-          echo "=== 文件相关区域内容 ==="
-          grep -n "unaligned" "$FILE" || echo "未找到 unaligned 字符串"
-
-          sed -i 's|#include <linux/unaligned.h>|#include <asm/unaligned.h>|g' "$FILE"
-
-          if grep -q "asm/unaligned.h" "$FILE"; then
-            echo "✅ Patched successfully"
-            grep -n "unaligned" "$FILE"
-          else
-            echo "::warning::替换未生效，检查是否已有其他写法"
-            grep -n "unaligned" "$FILE" || true
-          fi
-
-          echo "=== 清理冲突的 patch 文件 ==="
-          find "$GITHUB_WORKSPACE/openwrt" -path "*/mt7615d*/patches/*.patch" -name "*unaligned*" -exec rm -vf {} \;
-          find "$GITHUB_WORKSPACE/openwrt" -path "*/mt7615d*" -name "*.rej" -exec rm -vf {} \;
-
-      - name: 加载配置并修复 mt7615d
+      - name: 加载配置
         run: |
           cd openwrt
           [ -e ../$CONFIG_FILE ] && cp ../$CONFIG_FILE .config || echo "未找到 .config"
-
-          # 关闭 dbdc 驱动
-          if grep -q "CONFIG_PACKAGE_kmod-mt7615d_dbdc" .config; then
-            sed -i 's/^CONFIG_PACKAGE_kmod-mt7615d_dbdc=y/# CONFIG_PACKAGE_kmod-mt7615d_dbdc is not set/' .config
-          else
-            echo "# CONFIG_PACKAGE_kmod-mt7615d_dbdc is not set" >> .config
-          fi
-
-          # 启用 mt7615d
-          if grep -q "^CONFIG_PACKAGE_kmod-mt7615d=" .config; then
-            sed -i 's/^# CONFIG_PACKAGE_kmod-mt7615d is not set/CONFIG_PACKAGE_kmod-mt7615d=y/' .config
-          else
-            echo "CONFIG_PACKAGE_kmod-mt7615d=y" >> .config
-          fi
-
           grep -i mt7615 .config || true
 
       - name: 生成配置 (defconfig)
         run: |
           cd openwrt
           make defconfig
-
-          if ! grep -q "^CONFIG_PACKAGE_kmod-mt7615d=y" .config; then
-            echo "⚠️ defconfig 后 kmod-mt7615d 未启用，强制追加"
-            echo "CONFIG_PACKAGE_kmod-mt7615d=y" >> .config
-            make defconfig
-          fi
-
-          if grep -q "^CONFIG_PACKAGE_kmod-mt7615d_dbdc=y" .config; then
-            echo "⚠️ defconfig 后 dbdc 被重新启用，强制关闭"
-            sed -i 's/^CONFIG_PACKAGE_kmod-mt7615d_dbdc=y/# CONFIG_PACKAGE_kmod-mt7615d_dbdc is not set/' .config
-            make defconfig
-          fi
-
           grep -i mt7615 .config || true
 
       - name: 下载 dl 库
