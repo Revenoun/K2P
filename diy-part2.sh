@@ -1,46 +1,38 @@
 #!/bin/bash
-# File name: diy-part2.sh
-# Description: OpenWrt DIY script part 2 (After Update feeds)
-# 注意：本脚本由 workflow 在「仓库根目录」执行，
-#       因此所有路径都基于 openwrt/ 子目录。
+# diy2/part1.sh - 自动修复 mt7615d 驱动在内核 5.15+ 下的编译问题
 
-set -euo pipefail
+set -e
 
-echo ">>> [diy-part2] 当前目录: $(pwd)"
+# 定位驱动源码目录（根据你的实际仓库路径调整）
+MT7615D_SRC="$OPENWRT_DIR/package/lean/mt/drivers/mt7615d/src/mt_wifi/os/linux"
+TARGET_FILE="$MT7615D_SRC/rt_linux.c"
 
-# 切到 openwrt 源码目录
-cd openwrt
-
-# ---------- 1. 设置管理地址 192.168.2.1 ----------
-CONFIG_GEN="package/base-files/files/bin/config_generate"
-if [ -f "$CONFIG_GEN" ]; then
-  sed -i 's/192\.168\.1\.1/192.168.2.1/g' "$CONFIG_GEN"
-  echo ">>> 管理地址已改为 192.168.2.1"
-  grep -n "192.168.2.1" "$CONFIG_GEN" || true
-else
-  echo "!!! 未找到 $CONFIG_GEN"
-  exit 1
+# 如果源码不存在则跳过
+if [ ! -f "$TARGET_FILE" ]; then
+    echo "[diy2] mt7615d rt_linux.c not found, skip patch."
+    exit 0
 fi
 
-# ---------- 2. 修复 mt7615d 驱动的 unaligned.h 头文件 ----------
-MT7615D_DIR="package/lean/mt/drivers/mt7615d"
+echo "[diy2] Patching mt7615d rt_linux.c for kernel 5.15+ ..."
 
-if [ -d "$MT7615D_DIR" ]; then
-  echo ">>> 查找 rt_linux.h ..."
-  mapfile -t RT_FILES < <(find "$MT7615D_DIR" -type f -name "rt_linux.h" 2>/dev/null || true)
+# 仅当存在 get_fs/set_fs 时才修复，避免重复执行
+if grep -q "get_fs\|set_fs" "$TARGET_FILE"; then
+    # 备份一次
+    [ -f "${TARGET_FILE}.bak" ] || cp "$TARGET_FILE" "${TARGET_FILE}.bak"
 
-  if [ "${#RT_FILES[@]}" -eq 0 ]; then
-    echo "!!! 未找到 rt_linux.h，跳过 unaligned.h 修复"
-  else
-    for f in "${RT_FILES[@]}"; do
-      echo "    处理: $f"
-      sed -i -E 's|#include <linux/unaligned\.h>|#include <asm/unaligned.h>|g' "$f"
-    done
-    echo ">>> unaligned.h 修复完成，当前匹配行："
-    grep -Rn "unaligned.h" "$MT7615D_DIR" || true
-  fi
+    # 删除所有 get_fs / set_fs 调用
+    sed -i -e '/get_fs()/d' \
+           -e '/set_fs(KERNEL_DS)/d' \
+           -e '/set_fs(pOSFSInfo->fs)/d' \
+           -e '/set_fs(orig_fs)/d' \
+           "$TARGET_FILE"
+
+    # 如果 orig_fs 声明已无用，删除之
+    if ! grep -q "orig_fs" "$TARGET_FILE"; then
+        sed -i '/mm_segment_t orig_fs;/d' "$TARGET_FILE"
+    fi
+
+    echo "[diy2] mt7615d patch applied successfully."
 else
-  echo "!!! 未找到 $MT7615D_DIR，跳过驱动修复"
+    echo "[diy2] mt7615d already patched, nothing to do."
 fi
-
-echo ">>> [diy-part2] 完成"
