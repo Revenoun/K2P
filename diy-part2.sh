@@ -1,7 +1,7 @@
 #!/bin/bash
 # File name: diy-part2.sh
 # Description: OpenWrt DIY script part 2 (After Update feeds)
-# 注意：本脚本由 workflow 在「仓库根目录」source 执行，
+# 注意：本脚本由 workflow 在「仓库根目录」执行，
 #       因此所有路径都基于 openwrt/ 子目录。
 
 set -euo pipefail
@@ -27,7 +27,6 @@ MT7615D_DIR="package/lean/mt/drivers/mt7615d"
 
 if [ -d "$MT7615D_DIR" ]; then
   echo ">>> 查找 rt_linux.h ..."
-  # 兼容多种可能的 include 路径
   mapfile -t RT_FILES < <(find "$MT7615D_DIR" -type f -name "rt_linux.h" 2>/dev/null || true)
 
   if [ "${#RT_FILES[@]}" -eq 0 ]; then
@@ -35,9 +34,7 @@ if [ -d "$MT7615D_DIR" ]; then
   else
     for f in "${RT_FILES[@]}"; do
       echo "    处理: $f"
-      # 兼容可能带路径前缀的写法
       sed -i -E 's|#include <linux/unaligned\.h>|#include <asm/unaligned.h>|g' "$f"
-      sed -i -E 's|#include <asm/unaligned\.h>|#include <asm/unaligned.h>|g' "$f"  # 幂等
     done
     echo ">>> unaligned.h 修复完成，当前匹配行："
     grep -Rn "unaligned.h" "$MT7615D_DIR" || true
