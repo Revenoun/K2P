@@ -32,12 +32,7 @@ jobs:
           git clone https://github.com/coolsnowwolf/lede.git openwrt
           cd openwrt
 
-      - name: Load custom feeds
-        run: |
-          cd openwrt
-          sed -i '$a src-git helloworld https://github.com/fw876/helloworld' feeds.conf.default
-          sed -i '$a src-git passwall_packages https://github.com/xiaorouji/openwrt-passwall-packages' feeds.conf.default
-          sed -i '$a src-git passwall https://github.com/xiaorouji/openwrt-passwall' feeds.conf.default
+     
 
       - name: Update feeds
         run: |
