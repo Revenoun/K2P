@@ -86,7 +86,12 @@ jobs:
       #    如果脚本内需要操作 openwrt/ 下的文件，请自行 cd openwrt
       - name: 加载自定义文件 (diy-part1)
         run: |
-          [ -e $DIY_PART1 ] && chmod +x $DIY_PART1 && source $DIY_PART1 || echo "没有 diy-part1.sh"
+          if [ -e "$DIY_PART1" ]; then
+            chmod +x "$DIY_PART1"
+            bash "$DIY_PART1"
+          else
+            echo "没有 diy-part1.sh"
+          fi
 
       - name: 更新 feeds
         run: |
@@ -94,10 +99,15 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # ⚠️ diy-part2.sh 同样在仓库根目录执行，需要操作 openwrt 时请自行 cd
+      # ⚠️ diy-part2.sh 同样在仓库根目录执行，脚本内部自行 cd openwrt
       - name: 加载自定义文件 (diy-part2)
         run: |
-          [ -e $DIY_PART2 ] && chmod +x $DIY_PART2 && source $DIY_PART2 || echo "没有 diy-part2.sh"
+          if [ -e "$DIY_PART2" ]; then
+            chmod +x "$DIY_PART2"
+            bash "$DIY_PART2"
+          else
+            echo "没有 diy-part2.sh"
+          fi
 
       - name: 加载配置并修复 mt7615d  ⭐
         run: |
