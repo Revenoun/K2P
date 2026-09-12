@@ -1,6 +1,17 @@
 #!/bin/bash
-# 添加 luci-theme-aurora 主题源码
-#git clone https://github.com/eamonxg/luci-theme-aurora.git package/luci-theme-aurora
+# File name: diy-part1.sh
+# Description: OpenWrt DIY script part 1 (Before Update feeds)
 
+set -euo pipefail
 
-# echo 'src-git helloworld https://github.com/fw876/helloworld' >>feeds.conf.default
+echo ">>> [diy-part1] 当前目录: $(pwd)"
+cd openwrt
+
+# 示例：添加第三方 feed（按需启用）
+# sed -i '$a src-git kenzo https://github.com/kenzok8/openwrt-packages' feeds.conf.default
+# sed -i '$a src-git small https://github.com/kenzok8/small' feeds.conf.default
+
+# 示例：删除不想用的默认 feed
+# sed -i '/helloworld/d' feeds.conf.default
+
+echo ">>> [diy-part1] 完成"
