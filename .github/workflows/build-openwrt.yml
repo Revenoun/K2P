@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: write
-    if: github.repository_owner == github.actor
+    if: github.repository_owner == 'YOUR_GITHUB_USERNAME'
 
     steps:
       - name: 检出
@@ -60,13 +60,6 @@ jobs:
             qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs \
             upx-ucl unzip vim wget xmlto xxd zlib1g-dev
 
-      - name: 增加 swap
-        run: |
-          sudo fallocate -l 4G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-
       - name: 克隆源码
         id: clone
         run: |
@@ -75,43 +68,6 @@ jobs:
           COMMIT=$(git rev-parse HEAD)
           echo "commit=$COMMIT" >> $GITHUB_OUTPUT
           echo "REPO_COMMIT=$COMMIT" >> $GITHUB_ENV
-
-      # ===== 修复 mt7615d 驱动：linux/unaligned.h -> asm/unaligned.h =====
-      # 直接 sed 改源文件，不再依赖 patches/ 目录的 .patch 文件，避免 patch FAILED
-      - name: Fix mt7615d unaligned header
-        run: |
-          echo "=== 查找 mt7615d 驱动源文件 ==="
-          FILE=$(find "$GITHUB_WORKSPACE/openwrt" -path "*/mt7615d*/mt_wifi/include/os/rt_linux.h" 2>/dev/null | head -n1)
-
-          if [ -z "$FILE" ]; then
-            FILE=$(find "$GITHUB_WORKSPACE/openwrt" -name "rt_linux.h" -path "*/mt7615d*" 2>/dev/null | head -n1)
-          fi
-
-          if [ -z "$FILE" ]; then
-            echo "::error::rt_linux.h not found under mt7615d!"
-            echo "搜索所有 rt_linux.h："
-            find "$GITHUB_WORKSPACE/openwrt" -name "rt_linux.h" 2>/dev/null || true
-            exit 1
-          fi
-
-          echo "Found: $FILE"
-
-          echo "=== 文件相关区域内容 ==="
-          grep -n "unaligned" "$FILE" || echo "未找到 unaligned 字符串"
-
-          sed -i 's|#include <linux/unaligned.h>|#include <asm/unaligned.h>|g' "$FILE"
-
-          if grep -q "asm/unaligned.h" "$FILE"; then
-            echo "✅ Patched successfully"
-            grep -n "unaligned" "$FILE"
-          else
-            echo "::warning::替换未生效，检查是否已有其他写法"
-            grep -n "unaligned" "$FILE" || true
-          fi
-
-          echo "=== 清理冲突的 patch 文件 ==="
-          find "$GITHUB_WORKSPACE/openwrt" -path "*/mt7615d*/patches/*.patch" -name "*unaligned*" -exec rm -vf {} \;
-          find "$GITHUB_WORKSPACE/openwrt" -path "*/mt7615d*" -name "*.rej" -exec rm -vf {} \;
 
       # ===== 缓存 dl（下载的源码包）=====
       - name: 缓存 dl
@@ -128,7 +84,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.ccache
-          key: ccache-${{ env.REPO_BRANCH }}-${{ hashFiles('openwrt/.config') }}
+          key: ccache-${{ env.REPO_BRANCH }}-${{ hashFiles('.config') }}
           restore-keys: |
             ccache-${{ env.REPO_BRANCH }}-
             ccache-
@@ -156,6 +112,43 @@ jobs:
           else
             echo "没有 diy-part2.sh"
           fi
+
+      # ===== 修复 mt7615d 驱动：linux/unaligned.h -> asm/unaligned.h =====
+      # 移到 feeds install 之后，确保驱动源码已存在
+      - name: Fix mt7615d unaligned header
+        run: |
+          echo "=== 查找 mt7615d 驱动源文件 ==="
+          FILE=$(find "$GITHUB_WORKSPACE/openwrt" -path "*/mt7615d*/mt_wifi/include/os/rt_linux.h" 2>/dev/null | head -n1)
+
+          if [ -z "$FILE" ]; then
+            FILE=$(find "$GITHUB_WORKSPACE/openwrt" -name "rt_linux.h" -path "*/mt7615d*" 2>/dev/null | head -n1)
+          fi
+
+          if [ -z "$FILE" ]; then
+            echo "::warning::rt_linux.h not found under mt7615d, skip patch"
+            echo "搜索所有 rt_linux.h："
+            find "$GITHUB_WORKSPACE/openwrt" -name "rt_linux.h" 2>/dev/null || true
+            exit 0
+          fi
+
+          echo "Found: $FILE"
+
+          echo "=== 文件相关区域内容 ==="
+          grep -n "unaligned" "$FILE" || echo "未找到 unaligned 字符串"
+
+          sed -i 's|#include <linux/unaligned.h>|#include <asm/unaligned.h>|g' "$FILE"
+
+          if grep -q "asm/unaligned.h" "$FILE"; then
+            echo "✅ Patched successfully"
+            grep -n "unaligned" "$FILE"
+          else
+            echo "::warning::替换未生效，检查是否已有其他写法"
+            grep -n "unaligned" "$FILE" || true
+          fi
+
+          echo "=== 清理冲突的 patch 文件 ==="
+          find "$GITHUB_WORKSPACE/openwrt" -path "*/mt7615d*/patches/*.patch" -name "*unaligned*" -exec rm -vf {} \;
+          find "$GITHUB_WORKSPACE/openwrt" -path "*/mt7615d*" -name "*.rej" -exec rm -vf {} \;
 
       - name: 加载配置并修复 mt7615d
         run: |
@@ -221,7 +214,7 @@ jobs:
         run: |
           cd openwrt/bin/targets
           mkdir -p ../../../release
-          find . -type f \( -name "*.bin" -o -name "*.itb" -o -name "*.ubi" -o -name "*.manifest" -o -name "sha256sums" \) \
+          find . -path "*ramips/mt7621*" -type f \( -name "*.bin" -o -name "*.itb" -o -name "*.ubi" -o -name "*.manifest" -o -name "sha256sums" \) \
             -exec cp {} ../../../release/ \;
           {
             echo "K2P OpenWrt 固件，编译于 $(date +'%Y-%m-%d %H:%M')"
@@ -242,10 +235,10 @@ jobs:
         if: steps.compile.outputs.status == 'success' && (startsWith(github.ref, 'refs/tags/') || github.event.inputs.publish_release == 'true')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: K2P OpenWrt ${{ github.ref_name }}
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
+          name: K2P OpenWrt ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
           body: |
-            ## K2P OpenWrt 固件 ${{ github.ref_name }}
+            ## K2P OpenWrt 固件 ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
 
             - **内核版本**: ${{ env.KERNEL_VER }}
             - **源码**: ${{ env.REPO_URL }}
