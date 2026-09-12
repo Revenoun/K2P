@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - 'v*'          # 打 v1.0、v1.1 这种 tag 时触发发布
+      - 'v*'
   schedule:
     - cron: '0 20 * * 5'
 
@@ -20,8 +20,7 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     permissions:
-      contents: write        # ⭐ 发布 Release 需要写权限
-    # 防止 fork 后乱跑；schedule / tag / 手动触发均以仓库 owner 身份执行
+      contents: write
     if: github.repository_owner == github.actor
 
     steps:
@@ -64,6 +63,26 @@ jobs:
           echo "commit=$COMMIT" >> $GITHUB_OUTPUT
           echo "REPO_COMMIT=$COMMIT" >> $GITHUB_ENV
 
+      # ===== 修补 mt7615d 驱动：linux/unaligned.h -> asm/unaligned.h =====
+      - name: Patch mt7615d unaligned header
+        run: |
+          FILE=$(find "$GITHUB_WORKSPACE/openwrt" -name "rt_linux.h" \
+                 -path "*/mt7615d*/include/os/*" 2>/dev/null | head -n1)
+
+          if [ -n "$FILE" ]; then
+            echo "Found: $FILE"
+            sed -i 's|#include <linux/unaligned.h>|#include <asm/unaligned.h>|g' "$FILE"
+
+            if grep -q "asm/unaligned.h" "$FILE"; then
+              echo "Patched ok"
+            else
+              echo "::error::Patch failed for $FILE"
+              exit 1
+            fi
+          else
+            echo "::warning::rt_linux.h not found, skipping mt7615d patch"
+          fi
+
       # ===== 缓存 dl（下载的源码包）=====
       - name: 缓存 dl
         uses: actions/cache@v4
@@ -82,8 +101,6 @@ jobs:
           restore-keys: |
             ccache-
 
-      # ⚠️ diy-part1.sh 在「仓库根目录」执行；
-      #    如果脚本内需要操作 openwrt/ 下的文件，请自行 cd openwrt
       - name: 加载自定义文件 (diy-part1)
         run: |
           if [ -e "$DIY_PART1" ]; then
@@ -99,7 +116,6 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      # ⚠️ diy-part2.sh 同样在仓库根目录执行，脚本内部自行 cd openwrt
       - name: 加载自定义文件 (diy-part2)
         run: |
           if [ -e "$DIY_PART2" ]; then
@@ -109,17 +125,19 @@ jobs:
             echo "没有 diy-part2.sh"
           fi
 
-      - name: 加载配置并修复 mt7615d  ⭐
+      - name: 加载配置并修复 mt7615d
         run: |
           cd openwrt
           [ -e ../$CONFIG_FILE ] && cp ../$CONFIG_FILE .config || echo "未找到 .config"
 
           sed -i 's/^CONFIG_PACKAGE_kmod-mt7615d_dbdc=y/# CONFIG_PACKAGE_kmod-mt7615d_dbdc is not set/' .config
           grep -q "CONFIG_PACKAGE_kmod-mt7615d_dbdc" .config \
+
             || echo "# CONFIG_PACKAGE_kmod-mt7615d_dbdc is not set" >> .config
 
-          sed -i 's/^# CONFIG_PACKAGE_kmod-mt7615d is not set/CONFIG_PACKAGE_kmod-mt7615d=y/' .config
+          sed -i 's/^# CONFIG_PACKAGE_kmod-mt-mt7615d is not set/CONFIG_PACKAGE_kmod-mt7615d=y/' .config
           grep -q "^CONFIG_PACKAGE_kmod-mt7615d=" .config \
+
             || echo "CONFIG_PACKAGE_kmod-mt7615d=y" >> .config
 
           grep -i mt7615 .config
@@ -128,7 +146,6 @@ jobs:
         run: |
           cd openwrt
           make defconfig
-          # 校验 mt7615 选项没有被 defconfig 改回去
           if ! grep -q "^CONFIG_PACKAGE_kmod-mt7615d=y" .config; then
             echo "⚠️ 警告：defconfig 后 kmod-mt7615d 未启用，强制追加"
             echo "CONFIG_PACKAGE_kmod-mt7615d=y" >> .config
@@ -145,19 +162,16 @@ jobs:
         run: |
           cd openwrt
           make download -j8
-          # 不再删除小于 1KB 的文件，避免误删正常小文件
 
       - name: 编译固件
         id: compile
         run: |
           cd openwrt
-          # 启用 ccache
           export CCACHE_DIR=$HOME/.ccache
           export CCACHE_COMPILERCHECK=content
           make -j$(nproc) || make -j1 V=s
           echo "status=success" >> $GITHUB_OUTPUT
           echo "BUILD_TIME=$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
-          # 动态读取内核版本
           KVER=$(grep -m1 '^LINUX_VERSION-' include/kernel-* 2>/dev/null | head -n1 | cut -d= -f2 | tr -d '"' || true)
           [ -z "$KVER" ] && KVER="unknown"
           echo "KERNEL_VER=$KVER" >> $GITHUB_ENV
@@ -168,10 +182,8 @@ jobs:
         run: |
           cd openwrt/bin/targets
           mkdir -p ../../../release
-          # 只上传刷机用的关键文件，避免 Releases 太臃肿
           find . -type f \( -name "*.bin" -o -name "*.itb" -o -name "*.ubi" -o -name "*.manifest" -o -name "sha256sums" \) \
             -exec cp {} ../../../release/ \;
-          # 生成一个 README 放在 Release 里
           {
             echo "K2P OpenWrt 固件，编译于 $(date +'%Y-%m-%d %H:%M')"
             echo "内核版本：$KERNEL_VER"
@@ -187,7 +199,7 @@ jobs:
           path: release/*
           if-no-files-found: warn
 
-      - name: 发布到 Releases  ⭐⭐⭐
+      - name: 发布到 Releases
         if: steps.compile.outputs.status == 'success' && startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
