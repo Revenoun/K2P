@@ -1,19 +1,20 @@
 #!/bin/bash
 set -e
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OPENWRT_DIR="$REPO_ROOT/openwrt"
-MT7615D_DIR="$OPENWRT_DIR/package/lean/mt/drivers/mt7615d"
+echo ">>> [diy2] 进入 openwrt 目录"
+cd openwrt
+
+MT7615D_DIR="package/lean/mt/drivers/mt7615d"
 RT_LINUX="$MT7615D_DIR/src/mt_wifi/os/linux/rt_linux.c"
-PATCH_FILE="$REPO_ROOT/mt7615d-rt_linux.patch"
+PATCH_FILE="../mt7615d-rt_linux.patch"
 
 if [ -f "$RT_LINUX" ]; then
-    echo ">>> [diy2] 找到 $RT_LINUX"
+    echo ">>> [diy2] 找到 $RT_LINUX，开始打补丁"
     if [ -f "$PATCH_FILE" ]; then
         patch -p1 -d "$MT7615D_DIR" < "$PATCH_FILE" \
-            || echo ">>> [diy2] patch 失败或已打过，继续构建"
+            || echo ">>> [diy2] patch 应用失败或已打过，继续"
     else
-        echo ">>> [diy2] 补丁 $PATCH_FILE 不存在，跳过"
+        echo ">>> [diy2] 补丁文件 $PATCH_FILE 不存在，跳过"
     fi
 else
     echo ">>> [diy2] 未找到 $RT_LINUX，跳过打补丁"
