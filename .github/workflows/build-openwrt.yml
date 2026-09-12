@@ -2,6 +2,11 @@ name: Build OpenWrt K2P
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: '发布到 Release'
+        type: boolean
+        default: false
   push:
     tags:
       - 'v*'
@@ -15,6 +20,7 @@ env:
   DIY_PART1: diy-part1.sh
   DIY_PART2: diy-part2.sh
   TZ: Asia/Shanghai
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
 
 jobs:
   build:
@@ -54,6 +60,13 @@ jobs:
             qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs \
             upx-ucl unzip vim wget xmlto xxd zlib1g-dev
 
+      - name: 增加 swap
+        run: |
+          sudo fallocate -l 4G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+
       - name: 克隆源码
         id: clone
         run: |
@@ -63,33 +76,51 @@ jobs:
           echo "commit=$COMMIT" >> $GITHUB_OUTPUT
           echo "REPO_COMMIT=$COMMIT" >> $GITHUB_ENV
 
-      # ===== 修补 mt7615d 驱动：linux/unaligned.h -> asm/unaligned.h =====
-      - name: Patch mt7615d unaligned header
+      # ===== 修复 mt7615d 驱动：linux/unaligned.h -> asm/unaligned.h =====
+      # 直接 sed 改源文件，不再依赖 patches/ 目录的 .patch 文件，避免 patch FAILED
+      - name: Fix mt7615d unaligned header
         run: |
-          FILE=$(find "$GITHUB_WORKSPACE/openwrt" -name "rt_linux.h" \
-                 -path "*/mt7615d*/include/os/*" 2>/dev/null | head -n1)
+          echo "=== 查找 mt7615d 驱动源文件 ==="
+          FILE=$(find "$GITHUB_WORKSPACE/openwrt" -path "*/mt7615d*/mt_wifi/include/os/rt_linux.h" 2>/dev/null | head -n1)
 
-          if [ -n "$FILE" ]; then
-            echo "Found: $FILE"
-            sed -i 's|#include <linux/unaligned.h>|#include <asm/unaligned.h>|g' "$FILE"
-
-            if grep -q "asm/unaligned.h" "$FILE"; then
-              echo "Patched ok"
-            else
-              echo "::error::Patch failed for $FILE"
-              exit 1
-            fi
-          else
-            echo "::warning::rt_linux.h not found, skipping mt7615d patch"
+          if [ -z "$FILE" ]; then
+            FILE=$(find "$GITHUB_WORKSPACE/openwrt" -name "rt_linux.h" -path "*/mt7615d*" 2>/dev/null | head -n1)
           fi
+
+          if [ -z "$FILE" ]; then
+            echo "::error::rt_linux.h not found under mt7615d!"
+            echo "搜索所有 rt_linux.h："
+            find "$GITHUB_WORKSPACE/openwrt" -name "rt_linux.h" 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "Found: $FILE"
+
+          echo "=== 文件相关区域内容 ==="
+          grep -n "unaligned" "$FILE" || echo "未找到 unaligned 字符串"
+
+          sed -i 's|#include <linux/unaligned.h>|#include <asm/unaligned.h>|g' "$FILE"
+
+          if grep -q "asm/unaligned.h" "$FILE"; then
+            echo "✅ Patched successfully"
+            grep -n "unaligned" "$FILE"
+          else
+            echo "::warning::替换未生效，检查是否已有其他写法"
+            grep -n "unaligned" "$FILE" || true
+          fi
+
+          echo "=== 清理冲突的 patch 文件 ==="
+          find "$GITHUB_WORKSPACE/openwrt" -path "*/mt7615d*/patches/*.patch" -name "*unaligned*" -exec rm -vf {} \;
+          find "$GITHUB_WORKSPACE/openwrt" -path "*/mt7615d*" -name "*.rej" -exec rm -vf {} \;
 
       # ===== 缓存 dl（下载的源码包）=====
       - name: 缓存 dl
         uses: actions/cache@v4
         with:
           path: openwrt/dl
-          key: dl-${{ steps.clone.outputs.commit }}
+          key: dl-${{ env.REPO_BRANCH }}-${{ github.run_id }}
           restore-keys: |
+            dl-${{ env.REPO_BRANCH }}-
             dl-
 
       # ===== 缓存 ccache（编译中间产物）=====
@@ -97,8 +128,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.ccache
-          key: ccache-${{ steps.clone.outputs.commit }}
+          key: ccache-${{ env.REPO_BRANCH }}-${{ hashFiles('openwrt/.config') }}
           restore-keys: |
+            ccache-${{ env.REPO_BRANCH }}-
             ccache-
 
       - name: 加载自定义文件 (diy-part1)
@@ -130,33 +162,40 @@ jobs:
           cd openwrt
           [ -e ../$CONFIG_FILE ] && cp ../$CONFIG_FILE .config || echo "未找到 .config"
 
-          sed -i 's/^CONFIG_PACKAGE_kmod-mt7615d_dbdc=y/# CONFIG_PACKAGE_kmod-mt7615d_dbdc is not set/' .config
-          grep -q "CONFIG_PACKAGE_kmod-mt7615d_dbdc" .config \
+          # 关闭 dbdc 驱动
+          if grep -q "CONFIG_PACKAGE_kmod-mt7615d_dbdc" .config; then
+            sed -i 's/^CONFIG_PACKAGE_kmod-mt7615d_dbdc=y/# CONFIG_PACKAGE_kmod-mt7615d_dbdc is not set/' .config
+          else
+            echo "# CONFIG_PACKAGE_kmod-mt7615d_dbdc is not set" >> .config
+          fi
 
-            || echo "# CONFIG_PACKAGE_kmod-mt7615d_dbdc is not set" >> .config
+          # 启用 mt7615d
+          if grep -q "^CONFIG_PACKAGE_kmod-mt7615d=" .config; then
+            sed -i 's/^# CONFIG_PACKAGE_kmod-mt7615d is not set/CONFIG_PACKAGE_kmod-mt7615d=y/' .config
+          else
+            echo "CONFIG_PACKAGE_kmod-mt7615d=y" >> .config
+          fi
 
-          sed -i 's/^# CONFIG_PACKAGE_kmod-mt-mt7615d is not set/CONFIG_PACKAGE_kmod-mt7615d=y/' .config
-          grep -q "^CONFIG_PACKAGE_kmod-mt7615d=" .config \
-
-            || echo "CONFIG_PACKAGE_kmod-mt7615d=y" >> .config
-
-          grep -i mt7615 .config
+          grep -i mt7615 .config || true
 
       - name: 生成配置 (defconfig)
         run: |
           cd openwrt
           make defconfig
+
           if ! grep -q "^CONFIG_PACKAGE_kmod-mt7615d=y" .config; then
-            echo "⚠️ 警告：defconfig 后 kmod-mt7615d 未启用，强制追加"
+            echo "⚠️ defconfig 后 kmod-mt7615d 未启用，强制追加"
             echo "CONFIG_PACKAGE_kmod-mt7615d=y" >> .config
             make defconfig
           fi
+
           if grep -q "^CONFIG_PACKAGE_kmod-mt7615d_dbdc=y" .config; then
-            echo "⚠️ 警告：defconfig 后 dbdc 被重新启用，强制关闭"
+            echo "⚠️ defconfig 后 dbdc 被重新启用，强制关闭"
             sed -i 's/^CONFIG_PACKAGE_kmod-mt7615d_dbdc=y/# CONFIG_PACKAGE_kmod-mt7615d_dbdc is not set/' .config
             make defconfig
           fi
-          grep -i mt7615 .config
+
+          grep -i mt7615 .config || true
 
       - name: 下载 dl 库
         run: |
@@ -169,10 +208,10 @@ jobs:
           cd openwrt
           export CCACHE_DIR=$HOME/.ccache
           export CCACHE_COMPILERCHECK=content
-          make -j$(nproc) || make -j1 V=s
+          make -j5 || make -j1 V=s
           echo "status=success" >> $GITHUB_OUTPUT
           echo "BUILD_TIME=$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
-          KVER=$(grep -m1 '^LINUX_VERSION-' include/kernel-* 2>/dev/null | head -n1 | cut -d= -f2 | tr -d '"' || true)
+          KVER=$(make --no-print-directory kernelversion 2>/dev/null || echo "unknown")
           [ -z "$KVER" ] && KVER="unknown"
           echo "KERNEL_VER=$KVER" >> $GITHUB_ENV
           echo "内核版本：$KVER"
@@ -200,7 +239,7 @@ jobs:
           if-no-files-found: warn
 
       - name: 发布到 Releases
-        if: steps.compile.outputs.status == 'success' && startsWith(github.ref, 'refs/tags/')
+        if: steps.compile.outputs.status == 'success' && (startsWith(github.ref, 'refs/tags/') || github.event.inputs.publish_release == 'true')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
