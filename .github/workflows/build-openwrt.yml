@@ -76,9 +76,9 @@ jobs:
             自动编译的 OpenWrt 固件
             编译时间: ${{ github.event.repository.updated_at }}
             提交: ${{ github.sha }}
-          # 上传所有编译好的 .img.gz 文件
+          # 上传所有编译好的固件文件
           files: |
-            openwrt/bin/targets/*/*/*.img.gz
+            openwrt/bin/targets/*/*/*
           # 设置为草稿 (draft)，这样您可以在发布前检查一下。如果不需要可以改为 false
           draft: false
           # 设置为预发布 (prerelease)，如果需要正式版可以改为 false
