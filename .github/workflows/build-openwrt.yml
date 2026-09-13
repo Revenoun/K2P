@@ -153,8 +153,6 @@ jobs:
           body_path: release.txt
           files: |
             /workdir/openwrt/bin/targets/**/*.bin
-            /workdir/openwrt/bin/targets/**/*.itb
-            /workdir/openwrt/bin/targets/**/*.img.gz
             /workdir/openwrt/bin/targets/**/sha256sums
           draft: false
           prerelease: false
