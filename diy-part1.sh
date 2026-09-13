@@ -4,7 +4,7 @@
 # 修改默认 IP 地址为 192.168.1.1 (根据自己需求修改)
 sed -i 's/192.168.1.1/192.168.2.1/g' package/base-files/files/bin/config_generate
 
-/*# 修改默认主题 (这里假设使用 argon 主题，需确保源码中已包含)
+/*  # 修改默认主题 (这里假设使用 argon 主题，需确保源码中已包含)
 # sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile
 # ================= 修改默认 WiFi 名称 =================
 # 定义您想要的默认 WiFi 名称 (2.4G 和 5G)
@@ -55,4 +55,5 @@ if [ "$MODIFIED" -eq 1 ]; then
 else
     echo "⚠️ 警告：未能匹配到任何默认 SSID 配置，请手动检查源码！"
 fi
-# ====================================================*/
+# ====================================================
+*/
