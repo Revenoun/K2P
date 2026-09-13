@@ -129,8 +129,10 @@ jobs:
       - name: Clean packages dir
         if: (!cancelled())
         run: |
-          rm -rf /workdir/openwrt/bin/targets/*/*/packages
+          find /workdir/openwrt/bin/targets -type d -name packages -exec rm -rf {} + 2>/dev/null || true
           echo "cleaned packages dir"
+          echo "=== remaining files ==="
+          find /workdir/openwrt/bin/targets -type f -exec ls -lh {} \;
 
       - name: Generate release tag
         id: tag
@@ -153,6 +155,10 @@ jobs:
           body_path: release.txt
           files: |
             /workdir/openwrt/bin/targets/**/*.bin
+            /workdir/openwrt/bin/targets/**/*.trx
+            /workdir/openwrt/bin/targets/**/*.img
+            /workdir/openwrt/bin/targets/**/*.gz
             /workdir/openwrt/bin/targets/**/sha256sums
+            /workdir/openwrt/bin/targets/**/profiles.json
           draft: false
           prerelease: false
