@@ -1,24 +1,28 @@
-      - name: Compile the firmware
-        run: |
-          cd openwrt
-          make -j$(nproc) || make -j1 V=s
+- name: Compile the firmware
+  run: |
+    cd openwrt
+    make -j$(nproc) V=s || make -j1 V=s
 
-      - name: List build outputs
-        run: find openwrt/bin/targets -type f | sort
+- name: List build outputs
+  run: find openwrt/bin/targets -type f | sort
 
-      - name: Check firmware size
-        run: find openwrt/bin/targets -name "*.bin" -exec ls -lh {} \;
+- name: Check firmware size
+  run: find openwrt/bin/targets -name "*.bin" -exec ls -lh {} \;
 
-      - name: Create Release and Upload Firmware
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ github.run_number }}
-          name: OpenWrt Firmware ${{ github.run_number }}
-          body: |
-            自动编译的 OpenWrt 固件
-            编译时间: ${{ github.event.head_commit.timestamp || github.run_started_at }}
-            提交: ${{ github.sha }}
-          files: |
-            openwrt/bin/targets/*/*/*
-          draft: false
-          prerelease: false
+- name: Create Release and Upload Firmware
+  uses: softprops/action-gh-release@v2
+  with:
+    tag_name: v${{ github.run_number }}
+    name: OpenWrt Firmware ${{ github.run_number }}
+    body: |
+      自动编译的 OpenWrt 固件
+      编译时间: ${{ github.run_started_at }}
+      提交: ${{ github.sha }}
+    files: |
+      openwrt/bin/targets/**/*.bin
+      openwrt/bin/targets/**/*.itb
+      openwrt/bin/targets/**/sha256sums
+    draft: false
+    prerelease: false
+  env:
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
