@@ -153,12 +153,14 @@ jobs:
           tag_name: ${{ steps.tag.outputs.release_tag }}
           name: OpenWrt Firmware ${{ steps.tag.outputs.release_tag }}
           body_path: release.txt
+          working_directory: /workdir/openwrt
           files: |
-            /workdir/openwrt/bin/targets/**/*.bin
-            /workdir/openwrt/bin/targets/**/*.trx
-            /workdir/openwrt/bin/targets/**/*.img
-            /workdir/openwrt/bin/targets/**/*.gz
-            /workdir/openwrt/bin/targets/**/sha256sums
-            /workdir/openwrt/bin/targets/**/profiles.json
+            bin/targets/**/*.bin
+            bin/targets/**/*.trx
+            bin/targets/**/*.img
+            bin/targets/**/*.gz
+            bin/targets/**/sha256sums
+            bin/targets/**/profiles.json
           draft: false
           prerelease: false
+          fail_on_unmatched_files: true
