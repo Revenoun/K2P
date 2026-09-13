@@ -1,28 +1,160 @@
-- name: Compile the firmware
-  run: |
-    cd openwrt
-    make -j$(nproc) V=s || make -j1 V=s
+name: Build OpenWrt
 
-- name: List build outputs
-  run: find openwrt/bin/targets -type f | sort
+on:
+  workflow_dispatch:
 
-- name: Check firmware size
-  run: find openwrt/bin/targets -name "*.bin" -exec ls -lh {} \;
+env:
+  REPO_URL: https://github.com/coolsnowwolf/lede
+  REPO_BRANCH: master
+  FEEDS_CONF: feeds.conf.default
+  CONFIG_FILE: .config
+  DIY_PART1: diy-part1.sh
+  DIY_PART2: diy-part2.sh
+  TZ: Asia/Shanghai
+  UPLOAD_RELEASE: true
 
-- name: Create Release and Upload Firmware
-  uses: softprops/action-gh-release@v2
-  with:
-    tag_name: v${{ github.run_number }}
-    name: OpenWrt Firmware ${{ github.run_number }}
-    body: |
-      自动编译的 OpenWrt 固件
-      编译时间: ${{ github.run_started_at }}
-      提交: ${{ github.sha }}
-    files: |
-      openwrt/bin/targets/**/*.bin
-      openwrt/bin/targets/**/*.itb
-      openwrt/bin/targets/**/sha256sums
-    draft: false
-    prerelease: false
-  env:
-    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialization environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo -E apt-get -qq update
+          sudo -E apt-get -qq install -y \
+            ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+            bzip2 ccache clang cmake cpio curl device-tree-compiler flex gawk gettext \
+            gcc-multilib g++-multilib git gperf haveged help2man intltool libc6-dev-i386 \
+            libfuse2 libgsl-dev libelf-dev libncurses5-dev libncursesw5-dev libssl-dev \
+            libusb-1.0-0-dev libxml2-dev libz-dev llvm lrzsz msmtp nano ninja-build \
+            p7zip p7zip-full patch pkgconf python3 python3-pip python3-ply python3-docutils \
+            python3-pyelftools qemu-utils re2c rsync scons squashfs-tools subversion swig \
+            texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
+          sudo -E apt-get -qq autoremove --purge
+          sudo -E apt-get -qq clean
+          sudo timedatectl set-timezone "$TZ"
+          sudo mkdir -p /workdir
+          sudo chown "$USER":"$USER" /workdir
+          df -hT
+
+      - name: Clone source code
+        working-directory: /workdir
+        run: |
+          df -hT "$PWD"
+          git clone --depth 1 -b "$REPO_BRANCH" "$REPO_URL" openwrt
+          cd openwrt
+          git log -1 --pretty=format:'%h %cd %s' --date=iso
+
+      - name: Load custom feeds
+        run: |
+          if [ -f "$GITHUB_WORKSPACE/$FEEDS_CONF" ]; then
+            cp "$GITHUB_WORKSPACE/$FEEDS_CONF" /workdir/openwrt/feeds.conf.default
+            echo "custom feeds loaded"
+          else
+            echo "use default feeds"
+          fi
+
+      - name: Load custom configuration part 1
+        run: |
+          if [ -f "$GITHUB_WORKSPACE/$DIY_PART1" ]; then
+            cp "$GITHUB_WORKSPACE/$DIY_PART1" ./diy-part1.sh
+            chmod +x ./diy-part1.sh
+            ./diy-part1.sh
+          else
+            echo "no diy-part1.sh"
+          fi
+        working-directory: /workdir/openwrt
+
+      - name: Update feeds
+        working-directory: /workdir/openwrt
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Load custom configuration part 2
+        run: |
+          if [ -f "$GITHUB_WORKSPACE/$DIY_PART2" ]; then
+            cp "$GITHUB_WORKSPACE/$DIY_PART2" ./diy-part2.sh
+            chmod +x ./diy-part2.sh
+            ./diy-part2.sh
+          else
+            echo "no diy-part2.sh"
+          fi
+        working-directory: /workdir/openwrt
+
+      - name: Load .config
+        run: |
+          if [ -f "$GITHUB_WORKSPACE/$CONFIG_FILE" ]; then
+            cp "$GITHUB_WORKSPACE/$CONFIG_FILE" /workdir/openwrt/.config
+            echo ".config loaded"
+          else
+            echo "no .config, use default"
+          fi
+        working-directory: /workdir/openwrt
+
+      - name: Generate configuration
+        working-directory: /workdir/openwrt
+        run: |
+          make defconfig
+          ./scripts/diffconfig.sh > seed.config
+          cat seed.config
+
+      - name: Download package sources
+        working-directory: /workdir/openwrt
+        run: |
+          make download -j"$(nproc)"
+          find dl -size -1024c -exec ls -l {} \;
+          find dl -size -1024c -exec rm -f {} \;
+
+      - name: Compile the firmware
+        working-directory: /workdir/openwrt
+        run: |
+          echo -e "$(nproc) thread compile"
+          make -j"$(nproc)" || make -j1 V=s
+        id: compile
+        continue-on-error: false
+
+      - name: Check space usage
+        if: (!cancelled())
+        run: df -hT
+
+      - name: Clean packages dir
+        if: (!cancelled())
+        run: |
+          rm -rf /workdir/openwrt/bin/targets/*/*/packages
+          echo "cleaned packages dir"
+
+      - name: Generate release tag
+        id: tag
+        if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+        run: |
+          echo "release_tag=OpenWrt_$(date +"%Y.%m.%d-%H%M")" >> "$GITHUB_OUTPUT"
+          touch release.txt
+          echo "Build: ${{ github.run_number }}" >> release.txt
+          echo "Commit: ${{ github.sha }}" >> release.txt
+          echo "Date: $(TZ=$TZ date +'%Y-%m-%d %H:%M:%S')" >> release.txt
+
+      - name: Upload firmware to release
+        uses: softprops/action-gh-release@v2
+        if: steps.tag.outputs.release_tag != '' && !cancelled()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.tag.outputs.release_tag }}
+          name: OpenWrt Firmware ${{ steps.tag.outputs.release_tag }}
+          body_path: release.txt
+          files: |
+            /workdir/openwrt/bin/targets/**/*.bin
+            /workdir/openwrt/bin/targets/**/*.itb
+            /workdir/openwrt/bin/targets/**/*.img.gz
+            /workdir/openwrt/bin/targets/**/sha256sums
+          draft: false
+          prerelease: false
