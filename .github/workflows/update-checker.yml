@@ -2,28 +2,68 @@ name: Update Checker
 
 on:
   schedule:
-    # 每天凌晨 0 点执行
-    - cron: '0 0 * * *'
+    - cron: '0 0 * * *'   # 每天 UTC 00:00 执行
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: update-checker
+  cancel-in-progress: false
 
 jobs:
   check:
     runs-on: ubuntu-latest
+    outputs:
+      updated: ${{ steps.diff.outputs.updated }}
+      upstream_sha: ${{ steps.diff.outputs.upstream_sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0    # 需要完整历史才能正确判断
 
       - name: Check for updates
+        id: diff
         run: |
-          # 这里逻辑是获取上游最新 commit
+          set -euo pipefail
+
+          # 幂等地添加 upstream
+          git remote remove upstream 2>/dev/null || true
           git remote add upstream https://github.com/coolsnowwolf/lede.git
-          git fetch upstream main
-          LOCAL=$(git rev-parse HEAD)
-          REMOTE=$(git rev-parse upstream/main)
-          
-          if [ "$LOCAL" != "$REMOTE" ]; then
-            echo "New updates found!"
-            # 这里可以添加发送邮件通知，或者使用 GitHub API 触发编译
-          else
+
+          # 只拉 main 分支
+          git fetch --no-tags upstream main
+
+          UPSTREAM_SHA=$(git rev-parse upstream/main)
+          echo "upstream_sha=$UPSTREAM_SHA" >> "$GITHUB_OUTPUT"
+
+          # 判断当前 HEAD 是否已包含 upstream/main
+          if git merge-base --is-ancestor "$UPSTREAM_SHA" HEAD; then
             echo "No updates found."
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New updates found! upstream=$UPSTREAM_SHA"
+            echo "updated=true" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Summary
+        run: |
+          echo "### Update Check" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Upstream SHA: \`${{ steps.diff.outputs.upstream_sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Updated: \`${{ steps.diff.outputs.updated }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # ---- 邮件通知（可选，需要就取消注释并配置 secrets） ----
+      # - name: Send mail
+      #   if: steps.diff.outputs.updated == 'true'
+      #   uses: dawidd6/action-send-mail@v3
+      #   with:
+      #     server_address: smtp.example.com
+      #     server_port: 465
+      #     username: ${{ secrets.MAIL_USER }}
+      #     password: ${{ secrets.MAIL_PASS }}
+      #     subject: "lede 上游有更新"
+      #     to: you@example.com
+      #     from: CI Bot
+      #     body: "上游最新 commit: ${{ steps.diff.outputs.upstream_sha }}"
