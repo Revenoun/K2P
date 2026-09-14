@@ -102,6 +102,17 @@ jobs:
             echo "no .config, use default"
           fi
 
+      - name: Fix dnsmasq conflict
+        run: |
+          cd openwrt
+          # 移除默认 dnsmasq，避免与 dnsmasq-full 产生文件冲突
+          sed -i '/^CONFIG_PACKAGE_dnsmasq=y$/d' .config
+          sed -i '/^CONFIG_PACKAGE_dnsmasq=m$/d' .config
+          # 确保 dnsmasq-full 被启用（luci-app-ssr-plus 依赖它）
+          grep -q '^CONFIG_PACKAGE_dnsmasq-full=y' .config || echo 'CONFIG_PACKAGE_dnsmasq-full=y' >> .config
+          echo "dnsmasq conflict fixed"
+          grep -E '^CONFIG_PACKAGE_dnsmasq' .config || true
+
       - name: Make defconfig
         run: |
           cd openwrt
@@ -112,7 +123,7 @@ jobs:
       - name: Download package
         run: |
           cd openwrt
-          make download -j$(nproc)
+          make download -j$(nproc) || make download -j1 V=s
           find dl -size -1024c -exec ls -l {} \;
           find dl -size -1024c -exec rm -f {} \;
 
