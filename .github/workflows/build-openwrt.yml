@@ -2,6 +2,15 @@ name: Build OpenWrt for K2P
 
 on:
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag (例如 v1.0.0)，留空则使用时间戳'
+        required: false
+        default: ''
+      release_name:
+        description: 'Release 名称（留空则使用 tag 作为名称）'
+        required: false
+        default: ''
   push:
     branches:
       - main
@@ -13,6 +22,9 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: write
+
 env:
   REPO_URL: https://github.com/coolsnowwolf/lede
   REPO_BRANCH: master
@@ -21,9 +33,6 @@ env:
   DIY_PART1: diy-part1.sh
   DIY_PART2: diy-part2.sh
   TZ: Asia/Shanghai
-  UPLOAD_RELEASE: true
-  UPLOAD_ARTIFACTS: true
-  ARTIFACT_NAME: K2P-OpenWrt
 
 jobs:
   build:
@@ -143,20 +152,27 @@ jobs:
             exit 1
           fi
 
-      - name: Upload firmware to Artifacts
-        uses: actions/upload-artifact@v4
-        if: env.UPLOAD_ARTIFACTS == 'true'
-        with:
-          name: ${{ env.ARTIFACT_NAME }}
-          path: |
-            openwrt/bin/targets/*/*/*
-            openwrt/bin/targets/*/*/packages
+      - name: Resolve release tag
+        id: release_info
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="${{ github.event.inputs.tag_name }}"
+            if [ -z "$TAG" ]; then
+              TAG="k2p-$(date +%Y%m%d-%H%M)"
+            fi
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Resolved tag: $TAG"
 
       - name: Upload firmware to Release
-        if: env.UPLOAD_RELEASE == 'true' && github.event_name == 'release'
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ steps.release_info.outputs.tag }}
+          name: ${{ github.event.inputs.release_name || steps.release_info.outputs.tag }}
           files: |
             openwrt/bin/targets/*/*/*
           draft: false
