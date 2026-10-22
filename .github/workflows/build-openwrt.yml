@@ -3,21 +3,22 @@ name: Build ImmortalWrt for K2P
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 env:
   REPO_URL: https://github.com/immortalwrt/immortalwrt
   REPO_BRANCH: openwrt-24.10
   CONFIG_FILE: .config
   DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
-  UPLOAD_FIRMWARE: true
-  UPLOAD_RELEASE: false
 
 jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v4
 
       - name: Initialization environment
         env:
@@ -34,14 +35,14 @@ jobs:
         run: |
           git clone $REPO_URL -b $REPO_BRANCH openwrt
           cd openwrt
-          echo "src-git k2p https://github.com/immortalwrt/immortalwrt.git;openwrt-24.10" >> feeds.conf.default
-          ./scripts/feeds update -a
 
       - name: Load custom feeds
         run: |
-          chmod +x $DIY_P1_SH
-          cd openwrt
-          $GITHUB_WORKSPACE/$DIY_P1_SH
+          if [ -f "$GITHUB_WORKSPACE/$DIY_P1_SH" ]; then
+            chmod +x "$GITHUB_WORKSPACE/$DIY_P1_SH"
+            cd openwrt
+            "$GITHUB_WORKSPACE/$DIY_P1_SH"
+          fi
 
       - name: Update feeds
         run: |
@@ -51,24 +52,47 @@ jobs:
 
       - name: Load custom configuration
         run: |
-          chmod +x $DIY_P2_SH
           cd openwrt
-          $GITHUB_WORKSPACE/$DIY_P2_SH
-          [ -e $CONFIG_FILE ] && mv $CONFIG_FILE .config || touch .config
+          if [ -f "$GITHUB_WORKSPACE/$DIY_P2_SH" ]; then
+            chmod +x "$GITHUB_WORKSPACE/$DIY_P2_SH"
+            "$GITHUB_WORKSPACE/$DIY_P2_SH"
+          fi
+          if [ -f "$GITHUB_WORKSPACE/$CONFIG_FILE" ]; then
+            cp "$GITHUB_WORKSPACE/$CONFIG_FILE" .config
+          else
+            echo "错误：仓库根目录缺少 $CONFIG_FILE"
+            exit 1
+          fi
 
       - name: Generate configuration file
         run: |
           cd openwrt
           make defconfig
-          make download -j8
+          grep -q 'CONFIG_TARGET_ramips_mt7621_DEVICE_phicomm_k2p=y' .config || { echo "错误：K2P 目标未选中"; exit 1; }
+          make download -j8 || make download -j1 V=s
 
       - name: Compile the firmware
         run: |
           cd openwrt
           make -j$(nproc) || make -j1 V=s
 
-      - name: Upload firmware
-        uses: actions/upload-artifact@main
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
         with:
           name: ImmortalWrt_K2P
           path: openwrt/bin/targets/*
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: k2p-${{ github.run_number }}
+          name: ImmortalWrt K2P ${{ github.run_number }}
+          body: |
+            自动构建的 ImmortalWrt K2P 固件
+            - 分支: ${{ env.REPO_BRANCH }}
+            - 设备: phicomm_k2p
+            - 提交: ${{ github.sha }}
+          files: |
+            openwrt/bin/targets/ramips/mt7621/*.bin
+          fail_on_unmatched_files: true
+          draft: false
