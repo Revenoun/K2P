@@ -1,90 +1,47 @@
-name: Build OpenWrt for K2P
+name: Build ImmortalWrt for K2P
 
 on:
   workflow_dispatch:
-    inputs:
-      tag_name:
-        description: 'Release tag (例如 v1.0.0)，留空则使用时间戳'
-        required: false
-        default: ''
-      release_name:
-        description: 'Release 名称（留空则使用 tag 作为名称）'
-        required: false
-        default: ''
-  push:
-    branches:
-      - main
-    paths:
-      - '.config'
-      - 'diy-part1.sh'
-      - 'diy-part2.sh'
-      - '.github/workflows/build.yml'
-  release:
-    types: [published]
-
-permissions:
-  contents: write
 
 env:
-  REPO_URL: https://github.com/coolsnowwolf/lede
-  REPO_BRANCH: master
-  FEEDS_CONF: feeds.conf.default
+  REPO_URL: https://github.com/immortalwrt/immortalwrt
+  REPO_BRANCH: openwrt-24.10
   CONFIG_FILE: .config
-  DIY_PART1: diy-part1.sh
-  DIY_PART2: diy-part2.sh
-  TZ: Asia/Shanghai
+  DIY_P1_SH: diy-part1.sh
+  DIY_P2_SH: diy-part2.sh
+  UPLOAD_FIRMWARE: true
+  UPLOAD_RELEASE: false
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    if: github.event.repository.owner.id == github.event.sender.id
-
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@main
 
       - name: Initialization environment
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           sudo -E apt-get -qq update
-          sudo -E apt-get -qq install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
-            bzip2 ccache clang cmake cpio curl device-tree-compiler flex gawk gettext gcc-multilib g++-multilib \
-            git gperf haveged help2man intltool libc6-dev-i386 libfuse2 libgsl-dev libelf-dev libncurses5-dev \
-            libncursesw5-dev libssl-dev libusb-1.0-0-dev libxml2-dev libz-dev llvm lrzsz msmtp nano ninja-build \
-            p7zip p7zip-full patch pkgconf python3 python3-pip python3-ply python3-docutils python3-pyelftools \
-            qemu-utils re2c rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget \
-            xmlto xxd zlib1g-dev
-          sudo -E apt-get -qq autoremove --purge
-          sudo -E apt-get -qq clean
-          sudo timedatectl set-timezone "$TZ"
-          df -hT
+          sudo -E apt-get -qq install -y build-essential ccache ecj fastjar file g++ gawk \
+            gettext git java-propose-classpath libelf-dev libncurses5-dev \
+            libncursesw5-dev libssl-dev python3 python3-distutils python3-setuptools \
+            rsync unzip wget zlib1g-dev
+          sudo timedatectl set-timezone "Asia/Shanghai"
 
       - name: Clone source code
         run: |
-          git clone --depth 1 -b $REPO_BRANCH $REPO_URL openwrt
+          git clone $REPO_URL -b $REPO_BRANCH openwrt
           cd openwrt
-          git log -1 --pretty=format:'%h %cd %s' --date=iso
+          echo "src-git k2p https://github.com/immortalwrt/immortalwrt.git;openwrt-24.10" >> feeds.conf.default
+          ./scripts/feeds update -a
 
       - name: Load custom feeds
         run: |
-          if [ -f "$GITHUB_WORKSPACE/$FEEDS_CONF" ]; then
-            cp "$GITHUB_WORKSPACE/$FEEDS_CONF" openwrt/feeds.conf.default
-            echo "custom feeds loaded"
-          else
-            echo "use default feeds"
-          fi
-
-      - name: Run DIY part 1
-        run: |
-          if [ -f "$GITHUB_WORKSPACE/$DIY_PART1" ]; then
-            cp "$GITHUB_WORKSPACE/$DIY_PART1" openwrt/diy-part1.sh
-            chmod +x openwrt/diy-part1.sh
-            cd openwrt && ./diy-part1.sh
-          else
-            echo "no diy-part1.sh"
-          fi
+          chmod +x $DIY_P1_SH
+          cd openwrt
+          $GITHUB_WORKSPACE/$DIY_P1_SH
 
       - name: Update feeds
         run: |
@@ -92,88 +49,26 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Run DIY part 2
+      - name: Load custom configuration
         run: |
-          if [ -f "$GITHUB_WORKSPACE/$DIY_PART2" ]; then
-            cp "$GITHUB_WORKSPACE/$DIY_PART2" openwrt/diy-part2.sh
-            chmod +x openwrt/diy-part2.sh
-            cd openwrt && ./diy-part2.sh
-          else
-            echo "no diy-part2.sh"
-          fi
-
-      - name: Load custom config
-        run: |
-          if [ -f "$GITHUB_WORKSPACE/$CONFIG_FILE" ]; then
-            cp "$GITHUB_WORKSPACE/$CONFIG_FILE" openwrt/.config
-            echo ".config loaded"
-          else
-            echo "no .config, use default"
-          fi
-
-      - name: Fix dnsmasq conflict
-        run: |
+          chmod +x $DIY_P2_SH
           cd openwrt
-          # 移除默认 dnsmasq，避免与 dnsmasq-full 产生文件冲突
-          sed -i '/^CONFIG_PACKAGE_dnsmasq=y$/d' .config
-          sed -i '/^CONFIG_PACKAGE_dnsmasq=m$/d' .config
-          # 确保 dnsmasq-full 被启用（luci-app-ssr-plus 依赖它）
-          grep -q '^CONFIG_PACKAGE_dnsmasq-full=y' .config || echo 'CONFIG_PACKAGE_dnsmasq-full=y' >> .config
-          echo "dnsmasq conflict fixed"
-          grep -E '^CONFIG_PACKAGE_dnsmasq' .config || true
+          $GITHUB_WORKSPACE/$DIY_P2_SH
+          [ -e $CONFIG_FILE ] && mv $CONFIG_FILE .config || touch .config
 
-      - name: Make defconfig
+      - name: Generate configuration file
         run: |
           cd openwrt
           make defconfig
-          ./scripts/diffconfig.sh > seed.config
-          cat seed.config
+          make download -j8
 
-      - name: Download package
+      - name: Compile the firmware
         run: |
           cd openwrt
-          make download -j$(nproc) || make download -j1 V=s
-          find dl -size -1024c -exec ls -l {} \;
-          find dl -size -1024c -exec rm -f {} \;
-
-      - name: Compile firmware
-        run: |
-          cd openwrt
-          echo -e "$(nproc) thread compile"
           make -j$(nproc) || make -j1 V=s
 
-      - name: Check build result
-        run: |
-          if [ -d openwrt/bin/targets ]; then
-            echo "Build successful"
-            ls -lh openwrt/bin/targets/
-          else
-            echo "Build failed"
-            exit 1
-          fi
-
-      - name: Resolve release tag
-        id: release_info
-        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
-        run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            TAG="${{ github.ref_name }}"
-          else
-            TAG="${{ github.event.inputs.tag_name }}"
-            if [ -z "$TAG" ]; then
-              TAG="k2p-$(date +%Y%m%d-%H%M)"
-            fi
-          fi
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "Resolved tag: $TAG"
-
-      - name: Upload firmware to Release
-        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
-        uses: softprops/action-gh-release@v2
+      - name: Upload firmware
+        uses: actions/upload-artifact@main
         with:
-          tag_name: ${{ steps.release_info.outputs.tag }}
-          name: ${{ github.event.inputs.release_name || steps.release_info.outputs.tag }}
-          files: |
-            openwrt/bin/targets/*/*/*
-          draft: false
-          prerelease: false
+          name: ImmortalWrt_K2P
+          path: openwrt/bin/targets/*
