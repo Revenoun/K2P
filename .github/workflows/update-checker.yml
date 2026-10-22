@@ -1,69 +1,41 @@
 name: Update Checker
 
 on:
-  # schedule:
-  # - cron: '0 0 * * *'   # 每天 UTC 00:00 执行
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-concurrency:
-  group: update-checker
-  cancel-in-progress: false
+  schedule:
+    # 每天 UTC 时间 18:00 (北京时间凌晨 2:00) 检查一次更新
+    - cron: '0 18 * * *'
+  workflow_dispatch: # 允许手动触发检查
 
 jobs:
   check:
     runs-on: ubuntu-latest
-    outputs:
-      updated: ${{ steps.diff.outputs.updated }}
-      upstream_sha: ${{ steps.diff.outputs.upstream_sha }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@main
+
+      - name: Get Commit Hash
+        id: getHash
+        run: |
+          # 获取 ImmortalWrt 最新 commit hash
+          git clone --depth 1 -b openwrt-24.10 https://github.com/immortalwrt/immortalwrt.git openwrt
+          cd openwrt
+          echo "commitHash=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Compare Commit Hash
+        id: cacheHash
+        uses: actions/cache@main
         with:
-          fetch-depth: 0    # 需要完整历史才能正确判断
+          path: .commitHash
+          key: HEAD-${{ steps.getHash.outputs.commitHash }}
 
-      - name: Check for updates
-        id: diff
+      - name: Save New Commit Hash
+        if: steps.cacheHash.outputs.cache-hit != 'true'
         run: |
-          set -euo pipefail
+          echo ${{ steps.getHash.outputs.commitHash }} | tee .commitHash
 
-          # 幂等地添加 upstream
-          git remote remove upstream 2>/dev/null || true
-          git remote add upstream https://github.com/coolsnowwolf/lede.git
-
-          # 只拉 main 分支
-          git fetch --no-tags upstream main
-
-          UPSTREAM_SHA=$(git rev-parse upstream/main)
-          echo "upstream_sha=$UPSTREAM_SHA" >> "$GITHUB_OUTPUT"
-
-          # 判断当前 HEAD 是否已包含 upstream/main
-          if git merge-base --is-ancestor "$UPSTREAM_SHA" HEAD; then
-            echo "No updates found."
-            echo "updated=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "New updates found! upstream=$UPSTREAM_SHA"
-            echo "updated=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Summary
-        run: |
-          echo "### Update Check" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Upstream SHA: \`${{ steps.diff.outputs.upstream_sha }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Updated: \`${{ steps.diff.outputs.updated }}\`" >> "$GITHUB_STEP_SUMMARY"
-
-      # ---- 邮件通知（可选，需要就取消注释并配置 secrets） ----
-      # - name: Send mail
-      #   if: steps.diff.outputs.updated == 'true'
-      #   uses: dawidd6/action-send-mail@v3
-      #   with:
-      #     server_address: smtp.example.com
-      #     server_port: 465
-      #     username: ${{ secrets.MAIL_USER }}
-      #     password: ${{ secrets.MAIL_PASS }}
-      #     subject: "lede 上游有更新"
-      #     to: you@example.com
-      #     from: CI Bot
-      #     body: "上游最新 commit: ${{ steps.diff.outputs.upstream_sha }}"
+      - name: Trigger build
+        if: steps.cacheHash.outputs.cache-hit != 'true'
+        uses: peter-evans/repository-dispatch@main
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: ImmortalWrt_Update
